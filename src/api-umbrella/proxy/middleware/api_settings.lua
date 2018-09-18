@@ -22,7 +22,6 @@ return function(api)
   local request_method = ngx.ctx.request_method
   if(request_method == "OPTIONS") then
     settings["disable_api_key"] = true
-    settings["override_response_headers_string"] = "Access-Control-Allow-Headers: X-Api-Key"
   end
 
   -- See if there's any settings for a matching sub-url.

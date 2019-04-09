@@ -24,13 +24,10 @@ export default Base.extend({
     prefix: {
       refreshModel: true,
     },
-    beta_analytics: {
-      refreshModel: true,
-    },
   },
 
   model() {
-    let params = this.get('backendQueryParamValues');
+    let params = this.backendQueryParamValues;
     if(this.validateParams(params)) {
       return StatsDrilldown.find(params);
     } else {

@@ -249,7 +249,6 @@ describe "api-umbrella" do
       "mongod",
       "mora",
       "nginx",
-      "nginx-reloader",
       "rsyslog",
       "trafficserver",
       "web-delayed-job",
@@ -257,7 +256,7 @@ describe "api-umbrella" do
     ].each do |service|
       # Make sure all the expected processes are reported as running and aren't
       # flapping up and down.
-      expect(command_result.stdout).to match(%r{^\[\+ \+\+\+ \+\+\+\] +#{service} +uptime: \d+s/\d+s +pids: \d+/\d+$})
+      expect(output).to match(%r{^\[\+ \+\+\+ \+\+\+\] +#{service} +uptime: \d+s/\d+s +pids: \d+/\d+$})
     end
   end
 
@@ -268,7 +267,6 @@ describe "api-umbrella" do
       "/opt/api-umbrella/var/log/geoip-auto-updater/current",
       "/opt/api-umbrella/var/log/mongod/current",
       "/opt/api-umbrella/var/log/mora/current",
-      "/opt/api-umbrella/var/log/nginx-reloader/current",
       "/opt/api-umbrella/var/log/nginx/current",
       "/opt/api-umbrella/var/log/perpd/current",
       "/opt/api-umbrella/var/log/rsyslog/current",

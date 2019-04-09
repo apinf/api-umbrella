@@ -1,10 +1,11 @@
-local inspect = require "inspect"
+local config = require "api-umbrella.proxy.models.file_config"
 local lustache = require "lustache"
 local plutils = require "pl.utils"
 local stringx = require "pl.stringx"
 local tablex = require "pl.tablex"
 local types = require "pl.types"
 local utils = require "api-umbrella.proxy.utils"
+local xpcall_error_handler = require "api-umbrella.utils.xpcall_error_handler"
 
 local gsub = ngx.re.gsub
 local is_empty = types.is_empty
@@ -111,11 +112,11 @@ local function set_headers(settings)
           setmetatable(template_vars["headers"], nil)
         end
 
-        local ok, output = pcall(lustache.render, lustache, header["value"], template_vars)
+        local ok, output = xpcall(lustache.render, xpcall_error_handler, lustache, header["value"], template_vars)
         if ok then
           value = output
         else
-          ngx.log(ngx.ERR, "Mustache rendering error while rendering error template: " .. inspect(output))
+          ngx.log(ngx.ERR, "Mustache rendering error while rendering error template: " .. (tostring(output) or ""))
         end
       else
         value = header["value"]
@@ -143,7 +144,7 @@ local function strip_cookies(api)
       table.insert(strips, strip_regex)
     end
   end
-  if api["_id"] ~= "api-umbrella-web-backend" then
+  if api["_id"] ~= "api-umbrella-web-app-backend" then
     table.insert(strips, "^_api_umbrella_session$")
   end
   if #strips == 0 then return end
@@ -232,11 +233,11 @@ local function url_rewrites(api)
               end
             end
 
-            local ok, output = pcall(lustache.render, lustache, rewrite["_backend_replacement_path"], matches)
+            local ok, output = xpcall(lustache.render, xpcall_error_handler, lustache, rewrite["_backend_replacement_path"], matches)
             if ok then
               new_uri = output
             else
-              ngx.log(ngx.ERR, "Mustache rendering error while rendering error template: " .. inspect(output))
+              ngx.log(ngx.ERR, "Mustache rendering error while rendering error template: " .. (tostring(output) or ""))
             end
 
             if rewrite["_backend_replacement_args"] then
@@ -244,11 +245,11 @@ local function url_rewrites(api)
                 matches[key] = ngx.escape_uri(value)
               end
 
-              ok, output = pcall(lustache.render, lustache, rewrite["_backend_replacement_args"], matches)
+              ok, output = xpcall(lustache.render, xpcall_error_handler, lustache, rewrite["_backend_replacement_args"], matches)
               if ok then
                 new_uri = new_uri .. "?" .. output
               else
-                ngx.log(ngx.ERR, "Mustache rendering error while rendering error template: " .. inspect(output))
+                ngx.log(ngx.ERR, "Mustache rendering error while rendering error template: " .. (tostring(output) or ""))
               end
             end
           end

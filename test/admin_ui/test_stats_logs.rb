@@ -4,17 +4,30 @@ class Test::AdminUi::TestStatsLogs < Minitest::Capybara::Test
   include Capybara::Screenshot::MiniTestPlugin
   include ApiUmbrellaTestHelpers::AdminAuth
   include ApiUmbrellaTestHelpers::DateRangePicker
+  include ApiUmbrellaTestHelpers::Downloads
   include ApiUmbrellaTestHelpers::Setup
+
+  DEFAULT_QUERY = JSON.generate({
+    "condition" => "AND",
+    "rules" => [{
+      "field" => "gatekeeper_denied_code",
+      "id" => "gatekeeper_denied_code",
+      "input" => "select",
+      "operator" => "is_null",
+      "type" => "string",
+      "value" => nil,
+    }],
+  })
 
   def setup
     super
     setup_server
-    ElasticsearchHelper.clean_es_indices(["2014-11", "2015-01", "2015-03"])
+    LogItem.clean_indices!
   end
 
   def test_xss_escaping_in_table
     log = FactoryBot.create(:xss_log_item, :request_at => Time.parse("2015-01-16T06:06:28.816Z").utc, :request_method => "OPTIONS")
-    LogItem.gateway.refresh_index!
+    LogItem.refresh_indices!
 
     admin_login
     visit "/admin/#/stats/logs?search=&start_at=2015-01-12&end_at=2015-01-18&interval=day"
@@ -33,18 +46,7 @@ class Test::AdminUi::TestStatsLogs < Minitest::Capybara::Test
 
   def test_csv_download_link_changes_with_filters
     FactoryBot.create(:log_item, :request_at => Time.parse("2015-01-16T06:06:28.816Z").utc)
-    LogItem.gateway.refresh_index!
-    default_query = JSON.generate({
-      "condition" => "AND",
-      "rules" => [{
-        "field" => "gatekeeper_denied_code",
-        "id" => "gatekeeper_denied_code",
-        "input" => "select",
-        "operator" => "is_null",
-        "type" => "string",
-        "value" => nil,
-      }],
-    })
+    LogItem.refresh_indices!
 
     admin_login
     visit "/admin/#/stats/logs?search=&start_at=2015-01-12&end_at=2015-01-18&interval=day"
@@ -58,8 +60,7 @@ class Test::AdminUi::TestStatsLogs < Minitest::Capybara::Test
       "start_at" => "2015-01-12",
       "end_at" => "2015-01-18",
       "interval" => "day",
-      "query" => default_query,
-      "beta_analytics" => "false",
+      "query" => DEFAULT_QUERY,
     }, uri.query_values)
 
     visit "/admin/#/stats/logs?search=&start_at=2015-01-13&end_at=2015-01-18&interval=day"
@@ -73,8 +74,7 @@ class Test::AdminUi::TestStatsLogs < Minitest::Capybara::Test
       "start_at" => "2015-01-13",
       "end_at" => "2015-01-18",
       "interval" => "day",
-      "query" => default_query,
-      "beta_analytics" => "false",
+      "query" => DEFAULT_QUERY,
     }, uri.query_values)
 
     visit "/admin/#/stats/logs?search=&start_at=2015-01-12&end_at=2015-01-18&interval=day"
@@ -94,7 +94,6 @@ class Test::AdminUi::TestStatsLogs < Minitest::Capybara::Test
       "interval" => "day",
       "query" => JSON.generate({ "condition" => "AND", "rules" => [], "valid" => true }),
       "search" => "",
-      "beta_analytics" => "false",
     }, uri.query_values)
 
     visit "/admin/#/stats/logs?search=&start_at=2015-01-13&end_at=2015-01-18&interval=day"
@@ -114,18 +113,29 @@ class Test::AdminUi::TestStatsLogs < Minitest::Capybara::Test
       "end_at" => "2015-01-18",
       "interval" => "day",
       "query" => "",
-      "beta_analytics" => "false",
     }, uri.query_values)
   end
 
   def test_csv_download
     FactoryBot.create_list(:log_item, 5, :request_at => Time.parse("2015-01-16T06:06:28.816Z").utc, :request_method => "OPTIONS")
     FactoryBot.create_list(:log_item, 5, :request_at => 1421413588000, :request_method => "OPTIONS")
-    LogItem.gateway.refresh_index!
+    LogItem.refresh_indices!
 
     admin_login
     visit "/admin/#/stats/logs?search=&start_at=2015-01-12&end_at=2015-01-18&interval=day"
     refute_selector(".busy-blocker")
+
+    assert_link("Download CSV", :href => /start_at=2015-01-12/)
+    link = find_link("Download CSV")
+    uri = Addressable::URI.parse(link[:href])
+    assert_equal("/admin/stats/logs.csv", uri.path)
+    assert_equal({
+      "search" => "",
+      "start_at" => "2015-01-12",
+      "end_at" => "2015-01-18",
+      "interval" => "day",
+      "query" => DEFAULT_QUERY,
+    }, uri.query_values)
 
     # Wait for the ajax actions to fetch the graph and tables to both
     # complete, or else the download link seems to be flakey in Capybara.
@@ -134,15 +144,30 @@ class Test::AdminUi::TestStatsLogs < Minitest::Capybara::Test
     refute_selector(".busy-blocker")
     click_link "Download CSV"
 
-    # Downloading files via Capybara generally seems flakey, so add an extra
-    # wait.
-    Timeout.timeout(Capybara.default_max_wait_time) do
-      while(page.response_headers["Content-Type"] != "text/csv")
-        sleep(0.1)
-      end
-    end
-    assert_equal(200, page.status_code)
-    assert_equal("text/csv", page.response_headers["Content-Type"])
+    file = download_file
+    assert_equal(".csv", File.extname(file.path))
+    csv = CSV.read(file.path)
+    assert_equal([
+      "Time",
+      "Method",
+      "Host",
+      "URL",
+      "User",
+      "IP Address",
+      "Country",
+      "State",
+      "City",
+      "Status",
+      "Reason Denied",
+      "Response Time",
+      "Content Type",
+      "Accept Encoding",
+      "User Agent",
+      "User Agent Family",
+      "User Agent Type",
+      "Referer",
+      "Origin",
+    ], csv[0])
   end
 
   def test_changing_intervals
@@ -171,22 +196,6 @@ class Test::AdminUi::TestStatsLogs < Minitest::Capybara::Test
     refute_selector("button.active", :text => "Month")
     assert_selector("button.active", :text => "Minute")
     assert_link("Download CSV", :href => /interval=minute/)
-  end
-
-  def test_does_not_show_beta_analytics_toggle_by_default
-    admin_login
-    visit "/admin/#/stats/logs?search=&start_at=2015-01-12&end_at=2015-01-18&interval=day"
-    assert_text("view top users")
-    refute_text("Beta Analytics")
-  end
-
-  def test_shows_beta_analytics_toggle_when_enabled
-    override_config({ "analytics" => { "outputs" => ["kylin"] } }, nil) do
-      admin_login
-      visit "/admin/#/stats/logs?search=&start_at=2015-01-12&end_at=2015-01-18&interval=day"
-      assert_text("view top users")
-      assert_text("Beta Analytics")
-    end
   end
 
   def test_date_range_picker

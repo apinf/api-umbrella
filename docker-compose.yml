@@ -7,10 +7,6 @@ services:
     volumes:
       - .:/app
       - build_cache:/build
-    tmpfs:
-      # Mount the ember-cli tmp directory as a tmpfs partition for better
-      # performance.
-      - /app/src/api-umbrella/admin-ui/tmp:rw,size=128m,mode=1777
     environment:
       HTTP_PORT: 8888
       HTTPS_PORT: 8443
@@ -22,6 +18,8 @@ services:
         aliases:
           - umbrella.docker
 
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=0
 networks: 
   main:
     external: true

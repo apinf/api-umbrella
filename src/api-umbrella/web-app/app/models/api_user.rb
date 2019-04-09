@@ -59,7 +59,7 @@ class ApiUser
   validates :email,
     :presence => { :message => "Provide your email address." },
     :format => {
-      :with => /.+@.+\..+/,
+      :with => proc { ::Regexp.new(ApiUmbrellaConfig[:web][:api_user][:email_regex], ::Regexp::IGNORECASE) },
       :allow_blank => true,
       :message => "Provide a valid email address.",
     },
@@ -133,7 +133,7 @@ class ApiUser
   end
 
   def api_key_hides_at
-    @api_key_hides_at ||= self.created_at + 2.weeks
+    @api_key_hides_at ||= (self.created_at + 2.weeks).utc
   end
 
   def serializable_hash(options = nil)
@@ -150,7 +150,7 @@ class ApiUser
   def normalize_terms_and_conditions
     # Handle the acceptance validation regardless of if it comes from the JSON
     # api (true values) or from an HTML form ('1' values).
-    self.terms_and_conditions = (self.terms_and_conditions == true || self.terms_and_conditions == '1')
+    self.terms_and_conditions = (self.terms_and_conditions == true || self.terms_and_conditions == "1")
     true
   end
 

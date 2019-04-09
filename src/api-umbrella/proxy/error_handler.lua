@@ -1,3 +1,4 @@
+local config = require "api-umbrella.proxy.models.file_config"
 local deep_merge_overwrite_arrays = require "api-umbrella.utils.deep_merge_overwrite_arrays"
 local httpsify_current_url = require "api-umbrella.utils.httpsify_current_url"
 local is_hash = require "api-umbrella.utils.is_hash"
@@ -7,6 +8,7 @@ local path = require "pl.path"
 local stringx = require "pl.stringx"
 local tablex = require "pl.tablex"
 local utils = require "api-umbrella.proxy.utils"
+local xpcall_error_handler = require "api-umbrella.utils.xpcall_error_handler"
 
 local append_array = utils.append_array
 local deepcopy = tablex.deepcopy
@@ -113,7 +115,7 @@ local function render_template(template, data, format, strip_whitespace)
     end
   end
 
-  local ok, output = pcall(lustache.render, lustache, template, data)
+  local ok, output = xpcall(lustache.render, xpcall_error_handler, lustache, template, data)
   if ok then
     return output
   else
@@ -123,6 +125,9 @@ local function render_template(template, data, format, strip_whitespace)
 end
 
 return function(denied_code, settings, extra_data)
+  -- Store the gatekeeper rejection code for logging.
+  ngx.ctx.gatekeeper_denied_code = denied_code
+
   -- Redirect "not_found" errors to HTTPS.
   --
   -- Since these errors aren't subject to an API Backend's HTTPS requirements
@@ -137,8 +142,9 @@ return function(denied_code, settings, extra_data)
     end
   end
 
-  -- Store the gatekeeper rejection code for logging.
-  ngx.ctx.gatekeeper_denied_code = denied_code
+  if denied_code == "redirect_https" then
+    return ngx.redirect(httpsify_current_url(), ngx.HTTP_MOVED_PERMANENTLY)
+  end
 
   if not settings then
     settings = config["apiSettings"]

@@ -2,7 +2,7 @@ namespace :i18n do
   task :to_gettext => :environment do
     def escape(string)
       string.gsub(/([\\"\t\n])/) do
-        special_character = $1
+        special_character = Regexp.last_match(1)
         case special_character
         when "\t"
           "\\t"
@@ -105,10 +105,11 @@ namespace :i18n do
 
     I18n.available_locales.each do |locale|
       next if(locale == :en)
+
       locale_data = I18n.with_locale(locale) { I18n.t(".") }
       gettext_data = i18n_to_gettext(en_data, locale_data)
 
-      lang = locale.to_s.gsub("-", "_")
+      lang = locale.to_s.tr("-", "_")
       File.open(File.join(root_dir, "locale/#{lang}.po"), "w") do |file|
         file.puts('msgid ""')
         file.puts('msgstr ""')

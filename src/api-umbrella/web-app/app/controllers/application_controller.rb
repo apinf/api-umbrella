@@ -8,7 +8,7 @@ class ApplicationController < ActionController::Base
   around_action :set_userstamp
 
   def after_sign_in_path_for(resource)
-    if(resource.is_a?(Admin))
+    if(resource.kind_of?(Admin))
       "/admin/#/login"
     else
       super
@@ -91,11 +91,7 @@ class ApplicationController < ActionController::Base
   end
 
   def set_analytics_adapter
-    if(params[:beta_analytics] == "true")
-      @analytics_adapter = "kylin"
-    else
-      @analytics_adapter = ApiUmbrellaConfig[:analytics][:adapter]
-    end
+    @analytics_adapter = ApiUmbrellaConfig[:analytics][:adapter]
   end
 
   def set_time_zone
@@ -117,7 +113,7 @@ class ApplicationController < ActionController::Base
   private
 
   def authenticate_admin_from_token!
-    admin_token = request.headers['X-Admin-Auth-Token'].presence
+    admin_token = request.headers["X-Admin-Auth-Token"].presence
     admin = admin_token && Admin.where(:authentication_token => admin_token.to_s).first
 
     if admin
@@ -149,7 +145,7 @@ class ApplicationController < ActionController::Base
   # isn't passed in, then we fallback to the default rails CSRF logic in
   # verify_authenticity_token.
   def verify_authenticity_token_with_admin_token
-    admin_token = request.headers['X-Admin-Auth-Token'].presence
+    admin_token = request.headers["X-Admin-Auth-Token"].presence
     if(!current_admin || !admin_token || admin_token != current_admin.authentication_token)
       verify_authenticity_token
     end

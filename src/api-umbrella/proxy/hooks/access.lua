@@ -8,10 +8,12 @@ end
 local api_key_validator = require "api-umbrella.proxy.middleware.api_key_validator"
 local api_settings = require "api-umbrella.proxy.middleware.api_settings"
 local error_handler = require "api-umbrella.proxy.error_handler"
+local https_transition_user_validator = require "api-umbrella.proxy.middleware.https_transition_user_validator"
 local https_validator = require "api-umbrella.proxy.middleware.https_validator"
 local ip_validator = require "api-umbrella.proxy.middleware.ip_validator"
 local rate_limit = require "api-umbrella.proxy.middleware.rate_limit"
 local referer_validator = require "api-umbrella.proxy.middleware.referer_validator"
+local resolve_api_key = require "api-umbrella.proxy.middleware.resolve_api_key"
 local rewrite_request = require "api-umbrella.proxy.middleware.rewrite_request"
 local role_validator = require "api-umbrella.proxy.middleware.role_validator"
 local user_settings = require "api-umbrella.proxy.middleware.user_settings"
@@ -27,6 +29,23 @@ if err then
   return error_handler(err, settings)
 end
 
+-- Find the API key set on the request.
+err, err_data = resolve_api_key()
+if err then
+  return error_handler(err, settings, err_data)
+end
+
+-- If this API requires access over HTTPS, verify that it's happening.
+--
+-- Do this before verifying the API key so the ordering of the error messages
+-- encourage better security (tell the user first to make the request over
+-- HTTPS, rather than first telling them to supply their API key on an insecure
+-- HTTP request).
+err, err_data = https_validator(settings)
+if err then
+  return error_handler(err, settings, err_data)
+end
+
 -- Validate the API key that's passed in, if this API requires API keys.
 user, err = api_key_validator(settings)
 if err then
@@ -39,8 +58,13 @@ if err then
   return error_handler(err, settings)
 end
 
--- If this API requires access over HTTPS, verify that it's happening.
-err, err_data = https_validator(settings, user)
+-- Store the settings for use by the header_filter.
+ngx.ctx.settings = settings
+
+-- For API backends that are transitioning to HTTPS usage, verify these after
+-- the API key information has been fetched (since the transition behavior
+-- depends on the specific API key's create date).
+err, err_data = https_transition_user_validator(settings, user)
 if err then
   return error_handler(err, settings, err_data)
 end
@@ -77,7 +101,3 @@ err = rewrite_request(user, api, settings)
 if err then
   return error_handler(err, settings)
 end
-
--- Store the settings for use by the header_filter.
-ngx.ctx.settings = settings
-ngx.ctx.user = user

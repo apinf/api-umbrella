@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+elasticsearch6_version="6.7.1"
+elasticsearch6_hash="d13604f72f8139067d35b5edbe02ec8ef97189d0"
+
+set -e -u -x
+source ./tasks/helpers.sh
+
+task_working_dir
+download "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-$elasticsearch6_version.tar.gz" "sha1" "$elasticsearch6_hash"
+extract_download "elasticsearch-$elasticsearch6_version.tar.gz"
+
+mkdir -p "$TEST_INSTALL_PREFIX/elasticsearch6"
+rsync -a -v --checksum --delete-after "elasticsearch-$elasticsearch6_version/" "$TEST_INSTALL_PREFIX/elasticsearch6/"
+"$TEST_INSTALL_PREFIX/elasticsearch6/bin/elasticsearch-keystore" create
+chmod 660 "$TEST_INSTALL_PREFIX/elasticsearch6/config/elasticsearch.keystore"
+
+stamp

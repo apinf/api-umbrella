@@ -36,9 +36,9 @@ class Test::Processes::TestRpaths < Minitest::Test
       "/embedded/bin/ruby",
       "/embedded/sbin/rsyslogd",
       "/embedded/openresty/nginx/sbin/nginx",
-      "/embedded/libexec/trafficserver/ssl_cert_loader.so",
+      "/embedded/libexec/trafficserver/header_rewrite.so",
       # LuaRock
-      "/embedded/apps/core/shared/vendor/lib/lua/5.1/iconv.so",
+      "/embedded/apps/core/shared/vendor/lua/lib/lua/5.1/yaml.so",
       # Rubygem
       "/oj/oj.so",
     ].each do |expected_path_end|
@@ -47,7 +47,7 @@ class Test::Processes::TestRpaths < Minitest::Test
 
     # Ensure each binary file has no rpath or runpath setting.
     bins.each do |path|
-      output, _status = run_shell("chrpath -l #{path}")
+      output, _status = run_shell("chrpath", "-l", path)
       assert_match("no rpath or runpath tag found", output)
     end
   end

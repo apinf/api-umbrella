@@ -1,4 +1,4 @@
-local cjson = require "cjson"
+local json_encode = require "api-umbrella.utils.json_encode"
 
 local response = {
   file_config_version = ngx.shared.active_config:get("file_version"),
@@ -7,8 +7,7 @@ local response = {
   api_users_last_fetched_at = ngx.shared.api_users:get("last_fetched_at"),
   distributed_rate_limits_last_pulled_at = ngx.shared.stats:get("distributed_last_pulled_at"),
   distributed_rate_limits_last_pushed_at = ngx.shared.stats:get("distributed_last_pushed_at"),
-  upstreams_last_changed_at = ngx.shared.active_config:get("upstreams_last_changed_at"),
 }
 
 ngx.header["Content-Type"] = "application/json"
-ngx.say(cjson.encode(response))
+ngx.say(json_encode(response))

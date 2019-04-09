@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+
+set -e -u -x
+source ./tasks/helpers.sh
+
+task_working_dir
+
+# Copy the admin-ui app locally so that we can build locally (outside of the
+# source directory) without affecting the "node_modules" setup in the source
+# directory.
+mkdir -p app
+cd app
+rsync -a -v \
+  --delete \
+  --delete-excluded \
+  --filter=":- $SOURCE_DIR/src/api-umbrella/admin-ui/.gitignore" \
+  "$SOURCE_DIR/src/api-umbrella/admin-ui/" \
+  ./
+
+node_modules_dir="$WORK_DIR/tasks/app-deps/admin-ui/yarn/_persist/node_modules"
+ln -s "$node_modules_dir" ./node_modules
+
+# Install the "dist" result into the task's special _persist directory so that
+# these dependencies for the tasks/app/core task are still present if core
+# needs to be re-run, but not this task.
+mkdir -p ../_persist
+PATH="$DEV_INSTALL_PREFIX/bin:$DEFAULT_PATH" ./node_modules/.bin/ember build \
+  --environment=production \
+  --output-path=../_persist/dist
+
+# Copy the index.html to a separate location for the test suite, and modify the
+# inline config in the HTML file to set "integrationTestMode: true".
+rm -rf "$TEST_INSTALL_PREFIX/admin-ui"
+mkdir -p "$TEST_INSTALL_PREFIX/admin-ui"
+cp ../_persist/dist/index.html "$TEST_INSTALL_PREFIX/admin-ui/index.html"
+sed -i -e 's#<meta name="api-umbrella-admin-ui/config/environment" content="%7B%22#<meta name="api-umbrella-admin-ui/config/environment" content="%7B%22integrationTestMode%22%3Atrue%2C%22#' "$TEST_INSTALL_PREFIX/admin-ui/index.html"
+
+stamp

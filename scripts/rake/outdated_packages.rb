@@ -1,6 +1,7 @@
 require "json"
-require "open-uri"
+require "net/http"
 require "rainbow"
+require "uri"
 
 class OutdatedPackages
   REPOS = {
@@ -10,22 +11,23 @@ class OutdatedPackages
     },
     "bundler" => {
       :git => "https://github.com/bundler/bundler.git",
+      # Rails 4 not compatible with 2.0
+      :constraint => "~> 1.17",
     },
     "elasticsearch" => {
       :git => "https://github.com/elasticsearch/elasticsearch.git",
-      :constraint => "~> 2.4.3",
+      :constraint => "~> 2.4",
     },
-    "flume" => {
-      :git => "https://github.com/apache/flume.git",
+    "elasticsearch5" => {
+      :git => "https://github.com/elasticsearch/elasticsearch.git",
+      :constraint => "~> 5.6",
+    },
+    "elasticsearch6" => {
+      :git => "https://github.com/elasticsearch/elasticsearch.git",
+      :constraint => "~> 6.2",
     },
     "golang" => {
       :git => "https://go.googlesource.com/go",
-    },
-    "json_c" => {
-      :git => "https://github.com/json-c/json-c.git",
-    },
-    "kylin" => {
-      :git => "https://github.com/apache/kylin.git",
     },
     "libcidr" => {
       :http => "https://www.over-yonder.net/~fullermd/projects/libcidr",
@@ -36,67 +38,49 @@ class OutdatedPackages
     "libfastjson" => {
       :git => "https://github.com/rsyslog/libfastjson.git",
     },
-    "libgeoip" => {
-      :git => "https://github.com/maxmind/geoip-api-c.git",
+    "libmaxminddb" => {
+      :git => "https://github.com/maxmind/libmaxminddb.git",
     },
-    "liblogging" => {
-      :git => "https://github.com/rsyslog/liblogging.git",
-    },
-    "librdkafka" => {
-      :git => "https://github.com/edenhill/librdkafka.git",
-    },
-    "luarocks" => {
-      :git => "https://github.com/keplerproject/luarocks.git",
-    },
-    "luarock_argparse" => {
+    "lua_argparse" => {
       :luarock => "argparse",
     },
-    "luarock_cmsgpack" => {
+    "lua_cmsgpack" => {
       :luarock => "lua-cmsgpack",
     },
-    "luarock_iconv" => {
-      :luarock => "lua-iconv",
+    "lua_icu_date" => {
+      :git => "https://github.com/GUI/lua-icu-date.git",
+      :git_ref => "master",
     },
-    "luarock_inspect" => {
+    "lua_inspect" => {
       :luarock => "inspect",
     },
-    "luarock_libcidr" => {
-      :luarock => "libcidr-ffi",
+    "lua_libcidr_ffi" => {
+      :git => "https://github.com/GUI/lua-libcidr-ffi.git",
     },
-    "luarock_luacheck" => {
+    "lua_luacheck" => {
       :luarock => "luacheck",
     },
-    "luarock_luaposix" => {
+    "lua_luaposix" => {
       :luarock => "luaposix",
-    },
-    "luarock_luatz" => {
-      :luarock => "luatz",
-    },
-    "luarock_lustache" => {
-      :luarock => "lustache",
-    },
-    "luarock_lyaml" => {
-      :luarock => "lyaml",
-    },
-    "luarock_penlight" => {
-      :luarock => "penlight",
-    },
-    "luarock_resty_auto_ssl" => {
-      :luarock => "lua-resty-auto-ssl",
-    },
-    "luarock_resty_http" => {
-      :luarock => "lua-resty-http",
-    },
-    "luarock_resty_uuid" => {
-      :luarock => "lua-resty-uuid",
     },
     "lua_luasocket" => {
       :git => "https://github.com/diegonehab/luasocket.git",
       :git_ref => "master",
     },
-    "lua_resty_dns_cache" => {
-      :git => "https://github.com/hamishforbes/lua-resty-dns-cache.git",
-      :git_ref => "master",
+    "lua_lustache" => {
+      :luarock => "lustache",
+    },
+    "lua_lyaml" => {
+      :luarock => "lyaml",
+    },
+    "lua_penlight" => {
+      :luarock => "penlight",
+    },
+    "lua_resty_auto_ssl" => {
+      :luarock => "lua-resty-auto-ssl",
+    },
+    "lua_resty_http" => {
+      :git => "https://github.com/ledgetech/lua-resty-http.git",
     },
     "lua_resty_logger_socket" => {
       :git => "https://github.com/cloudflare/lua-resty-logger-socket.git",
@@ -106,8 +90,14 @@ class OutdatedPackages
       :git => "https://github.com/cloudflare/lua-resty-shcache.git",
       :git_ref => "master",
     },
-    "maven" => {
-      :git => "https://github.com/apache/maven.git",
+    "lua_resty_txid" => {
+      :git => "https://github.com/GUI/lua-resty-txid.git",
+    },
+    "lua_resty_uuid" => {
+      :luarock => "lua-resty-uuid",
+    },
+    "luarocks" => {
+      :git => "https://github.com/keplerproject/luarocks.git",
     },
     "mailhog" => {
       :git => "https://github.com/mailhog/MailHog.git",
@@ -123,17 +113,12 @@ class OutdatedPackages
       :git => "https://github.com/emicklei/mora.git",
       :git_ref => "master",
     },
-    "ngx_dyups" => {
-      :git => "https://github.com/yzprofile/ngx_http_dyups_module.git",
-      :git_ref => "master",
-    },
-    "ngx_txid" => {
-      :git => "https://github.com/streadway/ngx_txid.git",
-      :git_ref => "master",
+    "ngx_http_geoip2_module" => {
+      :git => "https://github.com/leev/ngx_http_geoip2_module.git",
     },
     "nodejs" => {
       :git => "https://github.com/nodejs/node.git",
-      :constraint => "~> 8.10",
+      :constraint => "~> 10.13",
     },
     "openldap" => {
       :git => "https://github.com/openldap/openldap.git",
@@ -146,16 +131,10 @@ class OutdatedPackages
       :string_version => true,
     },
     "pcre" => {
-      :http => "http://ftp.csx.cam.ac.uk/pub/software/programming/pcre/",
+      :http => "https://ftp.pcre.org/pub/pcre/",
     },
     "perp" => {
       :http => "http://b0llix.net/perp/site.cgi?page=download",
-    },
-    "phantomjs" => {
-      :git => "https://github.com/ariya/phantomjs.git",
-    },
-    "presto" => {
-      :git => "https://github.com/facebook/presto.git",
     },
     "ruby" => {
       :git => "https://github.com/ruby/ruby.git",
@@ -163,6 +142,8 @@ class OutdatedPackages
     },
     "rubygems" => {
       :git => "https://github.com/rubygems/rubygems.git",
+      # Rails 4 not compatible with Bundler 2.0
+      :constraint => "~> 2.7",
     },
     "rsyslog" => {
       :git => "https://github.com/rsyslog/rsyslog.git",
@@ -173,20 +154,22 @@ class OutdatedPackages
     "shellcheck" => {
       :git => "https://github.com/koalaman/shellcheck.git",
     },
+    "task" => {
+      :git => "https://github.com/go-task/task.git",
+    },
     "trafficserver" => {
       :git => "https://github.com/apache/trafficserver.git",
-      :constraint => "~> 5.3.2",
     },
     "unbound" => {
-      :http => "https://www.unbound.net/download.html",
+      :http => "https://nlnetlabs.nl/projects/unbound/download/",
     },
     "yarn" => {
       :git => "https://github.com/yarnpkg/yarn.git",
     },
-  }
+  }.freeze
 
   def luarocks_manifest
-    @luarocks_manifest ||= JSON.load(open("https://luarocks.org/manifest.json"))
+    @luarocks_manifest ||= JSON.parse(Net::HTTP.get_response(URI.parse("https://luarocks.org/manifest.json")).body)
   end
 
   def luarock_version_to_semver(version)
@@ -202,7 +185,7 @@ class OutdatedPackages
 
     # Remove prefixes containing the project name.
     tag.gsub!(/^#{name}[\-_]/i, "")
-    tag.gsub!(/^#{name.gsub("_", "-")}[\-_]/i, "")
+    tag.gsub!(/^#{name.tr("_", "-")}[\-_]/i, "")
 
     # Remove trailing "^{}" at end of git tags.
     tag.chomp!("^{}")
@@ -221,24 +204,26 @@ class OutdatedPackages
       tag.gsub!(/-\d{8}$/, "")
     when "openldap"
       tag.gsub!(/^rel_eng_/, "")
-      tag.gsub!(/_/, ".")
+      tag.tr!("_", ".")
     when "openssl", "ruby"
-      tag.gsub!(/_/, ".")
+      tag.tr!("_", ".")
     end
 
     tag
   end
 
   def initialize
+    seen_names = []
     versions = {}
-    versions_content = File.read(File.join(API_UMBRELLA_SRC_ROOT, "build/cmake/versions.cmake"))
+    versions_content = `git grep -hE "^\\w+_version=" tasks`.strip
     versions_content.each_line do |line|
-      current_version_matches = line.match(/set\((.+?)_VERSION (.+?)\)/)
+      current_version_matches = line.match(/^(.+?)_version=['"]([^'"]+)/)
       if(!current_version_matches)
         next
       end
 
       name = current_version_matches[1].downcase
+      seen_names.push(name)
       options = REPOS[name] || {}
       current_version_string = current_version_matches[2]
 
@@ -274,9 +259,9 @@ class OutdatedPackages
           puts "#{name}: Could not parse latest commit: git ls-remote #{options[:git]} #{options[:git_ref]}"
         end
 
-        versions[name][:current_version] = current_commit[0,7]
-        versions[name][:latest_version] = latest_commit[0,7]
-        versions[name][:wanted_version] = latest_commit[0,7]
+        versions[name][:current_version] = current_commit[0, 7]
+        versions[name][:latest_version] = latest_commit[0, 7]
+        versions[name][:wanted_version] = latest_commit[0, 7]
       elsif(options[:git])
         tags = `git ls-remote --tags #{options[:git]}`.lines
         tags.map! { |tag| tag_to_semver(name, tag.match(%r{refs/tags/(.+)$})[1]) }
@@ -287,7 +272,7 @@ class OutdatedPackages
         tags = luarocks_manifest["repository"][options[:luarock]].keys
         tags.map! { |tag| luarock_version_to_semver(tag) }
       elsif(options[:http])
-        content = open(options[:http]).read
+        content = Net::HTTP.get_response(URI.parse(options[:http])).body
         tags = content.scan(/#{name}-[\d\.]+.tar/)
         tags.map! { |f| tag_to_semver(name, File.basename(f, ".tar")) }
       end
@@ -322,7 +307,7 @@ class OutdatedPackages
                 versions[name][:wanted_version] = available_version
               end
             end
-          rescue ArgumentError => e
+          rescue ArgumentError
             unparsable_tags << tag
           end
         end
@@ -333,6 +318,11 @@ class OutdatedPackages
       end
     end
 
+    unused_repos = REPOS.keys - seen_names
+    if(unused_repos.any?)
+      puts "\n\nNOTICE: Unused repos defined in scripts/rake/outdated_packages.rb: #{unused_repos.sort.join(", ")}"
+    end
+
     puts "\n\n"
 
     print Rainbow("Package".ljust(32)).underline
@@ -341,7 +331,8 @@ class OutdatedPackages
     print Rainbow("Latest".rjust(16)).underline
     puts ""
 
-    versions.each do |name, info|
+    versions.keys.sort.each do |name|
+      info = versions[name]
       name_column = name.ljust(32)
       if(info[:wanted_version].to_s != info[:current_version].to_s)
         print Rainbow(name_column).red
@@ -364,4 +355,3 @@ class OutdatedPackages
     end
   end
 end
-

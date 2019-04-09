@@ -1,10 +1,12 @@
 local _M = {}
 
 local array_last = require "api-umbrella.utils.array_last"
+local config = require "api-umbrella.proxy.models.file_config"
 local distributed_rate_limit_queue = require "api-umbrella.proxy.distributed_rate_limit_queue"
 local mongo = require "api-umbrella.utils.mongo"
 local plutils = require "pl.utils"
 local types = require "pl.types"
+local xpcall_error_handler = require "api-umbrella.utils.xpcall_error_handler"
 
 local is_empty = types.is_empty
 local split = plutils.split
@@ -82,7 +84,12 @@ local function do_check()
   end
 
   if success then
-    ngx.shared.stats:set("distributed_last_pushed_at", current_save_time)
+    local set_ok, set_err, set_forcible = ngx.shared.stats:set("distributed_last_pushed_at", current_save_time)
+    if not set_ok then
+      ngx.log(ngx.ERR, "failed to set 'distributed_last_pushed_at' in 'stats' shared dict: ", set_err)
+    elseif set_forcible then
+      ngx.log(ngx.WARN, "forcibly set 'distributed_last_pushed_at' in 'stats' shared dict (shared dict may be too small)")
+    end
   end
 end
 
@@ -101,7 +108,7 @@ local function check(premature)
     return
   end
 
-  local ok, err = pcall(do_check)
+  local ok, err = xpcall(do_check, xpcall_error_handler)
   if not ok then
     ngx.log(ngx.ERR, "failed to run backend load cycle: ", err)
   end

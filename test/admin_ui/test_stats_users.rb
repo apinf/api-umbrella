@@ -4,12 +4,13 @@ class Test::AdminUi::TestStatsUsers < Minitest::Capybara::Test
   include Capybara::Screenshot::MiniTestPlugin
   include ApiUmbrellaTestHelpers::AdminAuth
   include ApiUmbrellaTestHelpers::DateRangePicker
+  include ApiUmbrellaTestHelpers::Downloads
   include ApiUmbrellaTestHelpers::Setup
 
   def setup
     super
     setup_server
-    ElasticsearchHelper.clean_es_indices(["2014-11", "2015-01", "2015-03"])
+    LogItem.clean_indices!
   end
 
   def test_xss_escaping_in_table
@@ -21,7 +22,7 @@ class Test::AdminUi::TestStatsUsers < Minitest::Capybara::Test
       :user_email => user.email,
       :user_registration_source => user.registration_source,
     })
-    LogItem.gateway.refresh_index!
+    LogItem.refresh_indices!
 
     admin_login
     visit "/admin/#/stats/users?search=&start_at=2015-01-12&end_at=2015-01-18"
@@ -44,7 +45,7 @@ class Test::AdminUi::TestStatsUsers < Minitest::Capybara::Test
       :user_registration_source => user.registration_source,
     })
     FactoryBot.create_list(:log_item, 5, :request_at => 1421413588000)
-    LogItem.gateway.refresh_index!
+    LogItem.refresh_indices!
     default_query = JSON.generate({
       "condition" => "AND",
       "rules" => [{
@@ -70,7 +71,6 @@ class Test::AdminUi::TestStatsUsers < Minitest::Capybara::Test
       "end_at" => "2015-01-18",
       "search" => "",
       "query" => default_query,
-      "beta_analytics" => "false",
     }, uri.query_values)
 
     # Wait for the ajax actions to fetch the graph and tables to both
@@ -80,15 +80,20 @@ class Test::AdminUi::TestStatsUsers < Minitest::Capybara::Test
     refute_selector(".busy-blocker")
     click_link "Download CSV"
 
-    # Downloading files via Capybara generally seems flakey, so add an extra
-    # wait.
-    Timeout.timeout(Capybara.default_max_wait_time) do
-      while(page.response_headers["Content-Type"] != "text/csv")
-        sleep(0.1)
-      end
-    end
-    assert_equal(200, page.status_code)
-    assert_equal("text/csv", page.response_headers["Content-Type"])
+    file = download_file
+    assert_equal(".csv", File.extname(file.path))
+    csv = CSV.read(file.path)
+    assert_equal([
+      "Email",
+      "First Name",
+      "Last Name",
+      "Website",
+      "Registration Source",
+      "Signed Up (UTC)",
+      "Hits",
+      "Last Request (UTC)",
+      "Use Description",
+    ], csv[0])
   end
 
   def test_date_range_picker

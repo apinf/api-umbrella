@@ -46,6 +46,7 @@ patch -p1 < "$SOURCE_DIR/build/patches/openresty-cli.patch"
   --with-http_realip_module \
   --with-http_ssl_module \
   --with-http_stub_status_module \
+  --with-http_v2_module \
   --add-module="../ngx_http_geoip2_module-$ngx_http_geoip2_module_version"
 make -j"$NPROC"
 make install DESTDIR="$STAGE_DIR"

@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+
+set -e -u -x
+
+mkdir -p /etc/api-umbrella
+
+mkdir -p /build/.task
+ln -snf /build/.task /app/.task
+
+mkdir -p /build/build/work/stage/opt/api-umbrella/var/log
+ln -snf /build/build/work/stage/opt/api-umbrella /opt/api-umbrella
+ln -snf /build/build/work/stage/opt/api-umbrella/var/log /var/log/api-umbrella
+ln -snf /build/build/work /app/build/work
+
+mkdir -p /build/test/tmp/run
+mkdir -p /app/test/tmp
+ln -snf /build/test/tmp/run /app/test/tmp/run
+
+mkdir -p /app/build/work/tasks/app-deps/admin-ui/yarn/_persist/node_modules
+ln -snf /app/build/work/tasks/app-deps/admin-ui/yarn/_persist/node_modules /app/src/api-umbrella/admin-ui/node_modules
+
+mkdir -p /app/build/work/tasks/test-deps/bundle/_persist/.bundle
+ln -snf /app/build/work/tasks/test-deps/bundle/_persist/.bundle /app/.bundle
+
+mkdir -p /app/build/work/tasks/app-deps/web-app/bundle/_persist/.bundle
+ln -snf /app/build/work/tasks/app-deps/web-app/bundle/_persist/.bundle /app/src/api-umbrella/web-app/.bundle
+
+mkdir -p /app/src/api-umbrella/admin-ui/tmp
+chmod 1777 /app/src/api-umbrella/admin-ui/tmp
+
+exec "$@"

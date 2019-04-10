@@ -1,3 +1,4 @@
+local config = require "api-umbrella.proxy.models.file_config"
 local user_store = require "api-umbrella.proxy.user_store"
 local types = require "pl.types"
 local stringx = require "pl.stringx"
@@ -51,7 +52,7 @@ return function(settings)
 
   -- Find if and IdP was set
   if settings and settings["ext_auth_allowed"] and config["gatekeeper"]["default_idp"] then
-    api_key.idp=config["gatekeeper"]["default_idp"]
+    api_key.idp = config["gatekeeper"]["default_idp"]
     api_key.app_id = settings["idp_app_id"]
     api_key.mode = "authentication"
     if settings["idp_mode"] then

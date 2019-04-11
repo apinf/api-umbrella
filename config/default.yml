@@ -72,6 +72,7 @@ gatekeeper:
     host: http://idm.docker:3000
     realm: demo
     jwt_enabled: false
+    key: pubkey
 trafficserver:
   host: 127.0.0.1
   port: 14009

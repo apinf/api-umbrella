@@ -1,6 +1,7 @@
-local http = require "resty.http"
 local cjson = require "cjson"
 local config = require "api-umbrella.proxy.models.file_config"
+local jwt = require "resty.jwt"
+local http = require "resty.http"
 local _M = {}
 
 local function get_idm_user_info(token, dict)
@@ -80,6 +81,40 @@ local function get_idm_user_info(token, dict)
 end
 
 local function get_jwt_user_info(token, dict)
+    local result, err
+    local idp_back_name = dict["idp"]["backend_name"]
+
+    if idp_back_name == "keycloak-oauth2" then
+        -- Parse the JWT token
+        local decoded_token = jwt:verify(dict["idp"]["key"], token)
+
+        if not decoded_token["valid"] then
+            return nil, "The provided JWT is not valid"
+        end
+
+        local parsed_token = decoded_token["payload"]
+        result = {}
+
+        result["email"] = parsed_token["email"]
+        result["roles"] = {}
+
+        -- Load roles info
+        if parsed_token["realm_access"] ~= nil then
+            for _, role in ipairs(parsed_token["realm_access"]["roles"]) do
+                ngx.log(ngx.INFO, "Generated realm role: ", role_name)
+
+                result["roles"][#result["roles"] + 1] = "realm."..role
+            end
+        end
+
+        if parsed_token["resource_access"][dict["app_id"]] ~= nil then
+            for _, role in ipairs(parsed_token["resource_access"][dict["app_id"]]["roles"]) do
+                result["roles"][#result["roles"] + 1] = role
+            end
+        end
+    end
+
+    return result, err
 end
 
 -- Function to connect with an IdP service (Google, Facebook, Fiware, Github) for checking

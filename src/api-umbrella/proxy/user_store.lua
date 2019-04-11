@@ -88,7 +88,7 @@ local function lookup_user(api_key)
     -- looping over each value).
     -- Moreover, in case that the user information have been retrieved using a token validation,
     -- the roles associated with the token are stored in user ["roles"]
-    if api_key["idp"] and api_key["key_type"] == "token" and api_key["idp"]["backend_name"] == "fiware-oauth2" and ext_user.roles then
+    if api_key["idp"] and api_key["key_type"] == "token" and (api_key["idp"]["backend_name"] == "fiware-oauth2" or api_key["idp"]["backend_name"] == "keycloak-oauth2") and ext_user.roles then
       user["roles"] = invert_table(ext_user.roles)
     elseif user["roles"] then
       user["roles"] = invert_table(user["roles"])

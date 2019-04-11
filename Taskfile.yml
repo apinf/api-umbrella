@@ -436,6 +436,19 @@ tasks:
       - ./build/work/stamp/app-deps/lua/resty-http
     method: checksum
 
+    app-deps:lua:resty-jwt:
+    deps:
+      - deps:luarocks
+    cmds:
+      - ./tasks/app-deps/lua/resty-jwt
+    sources:
+      - ./build/work/stamp/deps/luarocks
+      - ./tasks/app-deps/lua/resty-jwt
+      - ./tasks/helpers.sh
+    generates:
+      - ./build/work/stamp/app-deps/lua/resty-jwt
+    method: checksum
+
   app-deps:lua:resty-logger-socket:
     deps:
       - deps:luarocks

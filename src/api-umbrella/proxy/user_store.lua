@@ -60,7 +60,7 @@ local function lookup_user(api_key)
       raw_user, err = admin_utils.create_user(ext_user)
 
       if err then
-        ngx.log(ngx.ERR, "New user could not be created", db_err)
+        ngx.log(ngx.ERR, "New user could not be created", err)
       end
     end
   end

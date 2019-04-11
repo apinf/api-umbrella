@@ -76,7 +76,7 @@ function _M.create_user(ext_user)
 
     local res, err = httpc:request(options)
 
-    if err or (res and res.status ~= 200) then
+    if err or (res and res.status ~= 200 and res.status ~= 406) then
         return nil, "It has not been possible to create internal user structures"
     end
 

@@ -1,5 +1,6 @@
 local http = require "resty.http"
 local cjson = require "cjson"
+local config = require "api-umbrella.proxy.models.file_config"
 local mongo = require "api-umbrella.utils.mongo"
 
 local _M = {}

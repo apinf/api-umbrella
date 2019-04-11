@@ -1,26 +1,22 @@
 local http = require "resty.http"
 local cjson = require "cjson"
+local config = require "api-umbrella.proxy.models.file_config"
 local _M = {}
 
--- Function to connect with an IdP service (Google, Facebook, Fiware, Github) for checking
--- if a token is valid and retrieve the user properties. The function takes
--- the token provided by the user and the IdP provider registered in the api-backend
--- for checking if the token is valid making a validation request to the corresponding IdP.
--- If the token is valid, the user information stored in the IdP is retrieved.
-
-function _M.first(dict)
-    local idp_back_name = dict["idp"]["backend_name"]
-    local token = dict["key_value"]
-    local idp_host, result, res, err, rpath,resource, method
+local function get_idm_user_info(token, dict)
+    local idp_host, result, res, err, rpath, resource, method
     local app_id = dict["app_id"]
     local mode = dict["mode"]
-    local ssl=false
+    local idp_back_name = dict["idp"]["backend_name"]
+    local headers = {}
+    local ssl = false
     local httpc = http.new()
     httpc:set_timeout(45000)
 
     if config["nginx"]["lua_ssl_trusted_certificate"] then
         ssl=true
     end
+
     local rquery =  "access_token="..token
     if idp_back_name == "google-oauth2" then
         rpath = "/oauth2/v3/userinfo"
@@ -35,6 +31,11 @@ function _M.first(dict)
         rpath = "/user"
         idp_host = dict["idp"]["host"]
         rquery = "access_token="..token.."&app_id="..app_id
+    elseif idp_back_name == "keycloak-oauth2" then
+        rpath = "/auth/realms/"..dict["idp"]["realm"].."/protocol/openid-connect/userinfo"
+        idp_host = dict["idp"]["host"]
+        rquery = ""
+        headers["Authorization"] = "Bearer "..token
     elseif idp_back_name == "facebook-oauth2" then
         rpath = "/me"
         idp_host="https://graph.facebook.com"
@@ -44,9 +45,10 @@ function _M.first(dict)
         idp_host="https://api.github.com"
     end
 
-    res, err =  httpc:request_uri(idp_host..rpath,{
+    res, err =  httpc:request_uri(idp_host..rpath, {
         method = "GET",
         query = rquery,
+        headers = headers,
         ssl_verify = ssl,
     })
 
@@ -72,7 +74,28 @@ function _M.first(dict)
                 end
             end
         end
+    end
 
+    return result, err
+end
+
+local function get_jwt_user_info(token, dict)
+end
+
+-- Function to connect with an IdP service (Google, Facebook, Fiware, Github) for checking
+-- if a token is valid and retrieve the user properties. The function takes
+-- the token provided by the user and the IdP provider registered in the api-backend
+-- for checking if the token is valid making a validation request to the corresponding IdP.
+-- If the token is valid, the user information stored in the IdP is retrieved.
+
+function _M.first(dict)
+    local token = dict["key_value"]
+    local result, err
+
+    if not dict["idp"]["jwt_enabled"] then
+        result, err = get_idm_user_info(token, dict)
+    else
+        result, err = get_jwt_user_info(token, dict)
     end
 
     return result, err

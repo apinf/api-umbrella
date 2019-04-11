@@ -32,7 +32,7 @@ local function lookup_user(api_key)
         api_key = api_key["key_value"],
       },
     })
-  elseif api_key["key_type"] == "token" and api_key["idp"]then
+  elseif api_key["key_type"] == "token" and api_key["idp"] then
     ext_user, idp_err = idp.first(api_key)
   end
 

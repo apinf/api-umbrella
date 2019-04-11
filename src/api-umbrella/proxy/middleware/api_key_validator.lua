@@ -24,8 +24,8 @@ local function resolve_api_key()
     if method == "header" and ngx.ctx.http_x_api_key then
       key.key_value = ngx.ctx.http_x_api_key
       key.key_type = "api_key"
-    elseif method == "fiware-oauth2" and ngx.ctx.http_authorization and startswith(ngx.ctx.http_authorization, "Bearer ") then
-      key.key_value = split(ngx.ctx.http_authorization)[2]
+    elseif (method == "fiware-oauth2" or method == "keycloak-oauth2") and ngx.var.http_authorization and startswith(ngx.var.http_authorization, "Bearer ") then
+      key.key_value = split(ngx.var.http_authorization)[2]
       key.key_type = "token"
     elseif method == "getParam" and ngx.ctx.arg_api_key then
       key.key_value = ngx.ctx.arg_api_key

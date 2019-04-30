@@ -7,9 +7,7 @@ before_install:
   - sudo apt-get install g++ build-essential
   
 script:
-  - pwd
-  - cd docker
-  - pwd
-  - docker build -t nrel/api-umbrella:test .
-  - docker tag nrel/api-umbrella:test nrel/api-umbrella:latest
+  - whoami
+  - chmod +x ./scripts/docker_build.sh
+  - ./scripts/docker_build.sh
   

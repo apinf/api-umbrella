@@ -1,6 +1,10 @@
 services:
   - docker
 
+branches:
+  only:
+    - develop
+
 before_install:
   - ls -la
   - sudo apt-get update

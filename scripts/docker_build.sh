@@ -7,6 +7,10 @@
 
 set -ev
 
+pwd
+
+cd docker
+
 docker build -t apinf/apinf-umbrella:$DOCKER_TAG .
 
 if [ "${TRAVIS_PULL_REQUEST}" = "false" -a "${TRAVIS_REPO_SLUG}" = "apinf/apinf-umbrella" ]

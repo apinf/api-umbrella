@@ -42,6 +42,16 @@ tasks:
       - ./build/work/stamp/deps/bundler
     method: checksum
 
+  deps:elasticsearch:
+    cmds:
+      - ./tasks/deps/elasticsearch
+    sources:
+      - ./tasks/deps/elasticsearch
+      - ./tasks/helpers.sh
+    generates:
+      - ./build/work/stamp/deps/elasticsearch
+    method: checksum
+
   deps:geolitecity:
     cmds:
       - ./tasks/deps/geolitecity
@@ -103,6 +113,16 @@ tasks:
       - ./tasks/helpers.sh
     generates:
       - ./build/work/stamp/deps/luarocks
+    method: checksum
+
+  deps:mongodb:
+    cmds:
+      - ./tasks/deps/mongodb
+    sources:
+      - ./tasks/deps/mongodb
+      - ./tasks/helpers.sh
+    generates:
+      - ./build/work/stamp/deps/mongodb
     method: checksum
 
   deps:mora:
@@ -202,9 +222,11 @@ tasks:
   deps:
     cmds:
       - task: deps:bundler
+      - task: deps:elasticsearch
       - task: deps:geolitecity
       - task: deps:libcidr
       - task: deps:luarocks
+      - task: deps:mongodb
       - task: deps:mora
       - task: deps:openresty
       - task: deps:perp
@@ -509,6 +531,7 @@ tasks:
       - task: app-deps:lua:penlight
       - task: app-deps:lua:resty-auto-ssl
       - task: app-deps:lua:resty-http
+      - task: app-deps:lua:resty-jwt
       - task: app-deps:lua:resty-logger-socket
       - task: app-deps:lua:resty-shcache
       - task: app-deps:lua:resty-txid
@@ -611,6 +634,26 @@ tasks:
       - ./build/work/stamp/test-deps/bundle
     method: checksum
 
+  test-deps:elasticsearch5:
+    cmds:
+      - ./tasks/test-deps/elasticsearch5
+    sources:
+      - ./tasks/test-deps/elasticsearch5
+      - ./tasks/helpers.sh
+    generates:
+      - ./build/work/stamp/test-deps/elasticsearch5
+    method: checksum
+
+  test-deps:elasticsearch6:
+    cmds:
+      - ./tasks/test-deps/elasticsearch6
+    sources:
+      - ./tasks/test-deps/elasticsearch6
+      - ./tasks/helpers.sh
+    generates:
+      - ./build/work/stamp/test-deps/elasticsearch6
+    method: checksum
+
   test-deps:lua:luacheck:
     deps:
       - deps:luarocks
@@ -690,6 +733,8 @@ tasks:
   test-deps:
     cmds:
       - task: test-deps:bundle
+      - task: test-deps:elasticsearch5
+      - task: test-deps:elasticsearch6
       - task: test-deps:lua:luacheck
       - task: test-deps:lua:penlight
       - task: test-deps:mailhog
@@ -739,6 +784,20 @@ tasks:
   outdated:
     cmds:
       - unbuffer ./tasks/outdated
+
+  test:
+    deps:
+      - all
+      - test-deps
+    cmds:
+      - unbuffer ./tasks/test/default
+
+  test:circle-ci:
+    deps:
+      - all
+      - test-deps
+    cmds:
+      - ./tasks/test/circle-ci
 
   clean:dev:
     cmds:

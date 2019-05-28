@@ -228,7 +228,7 @@ class Test::Proxy::Routing::TestHttpsConfig < Minitest::Test
         # Verify root is now routing to API backend.
         response = Typhoeus.get("https://127.0.0.1:9081/", keyless_http_options)
         assert_response_code(403, response)
-        assert_match("API_KEY_MISSING", response.body)
+        assert_match("API_KEY_OR_TOKEN_MISSING", response.body)
 
         # Check for redirect on root path based on
         # api_backend_required_https_regex_default.
@@ -250,7 +250,7 @@ class Test::Proxy::Routing::TestHttpsConfig < Minitest::Test
         # for sub paths.
         response = Typhoeus.get("http://127.0.0.1:9080/hello", keyless_http_options)
         assert_response_code(403, response)
-        assert_match("API_KEY_MISSING", response.body)
+        assert_match("API_KEY_OR_TOKEN_MISSING", response.body)
 
         response = Typhoeus.get("http://127.0.0.1:9080/hello", http_options)
         assert_response_code(200, response)

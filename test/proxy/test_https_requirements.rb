@@ -177,7 +177,7 @@ class Test::Proxy::TestHttpsRequirements < Minitest::Test
   def assert_https_allowed_missing_key(path, key = nil)
     response = Typhoeus.get("https://127.0.0.1:9081#{path}", http_options_with_key(key))
     assert_response_code(403, response)
-    assert_match("API_KEY_MISSING", response.body)
+    assert_match("API_KEY_OR_TOKEN_MISSING", response.body)
   end
 
   def assert_http_allowed(path, key = nil)
@@ -188,7 +188,7 @@ class Test::Proxy::TestHttpsRequirements < Minitest::Test
   def assert_http_allowed_missing_key(path, key = nil)
     response = Typhoeus.get("http://127.0.0.1:9080#{path}", http_options_with_key(key))
     assert_response_code(403, response)
-    assert_match("API_KEY_MISSING", response.body)
+    assert_match("API_KEY_OR_TOKEN_MISSING", response.body)
   end
 
   def assert_http_error(path, key = nil)

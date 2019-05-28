@@ -40,7 +40,7 @@ class Test::Proxy::ApiKeyValidation::TestBasicAuthParsing < Minitest::Test
   def test_denies_empty_authorization
     response = Typhoeus.get("http://127.0.0.1:9080/api/hello", keyless_http_options.deep_merge(empty_http_header_options("Authorization")))
     assert_response_code(403, response)
-    assert_match("API_KEY_MISSING", response.body)
+    assert_match("API_KEY_OR_TOKEN_MISSING", response.body)
   end
 
   def test_denies_unknown_authorization
@@ -50,7 +50,7 @@ class Test::Proxy::ApiKeyValidation::TestBasicAuthParsing < Minitest::Test
       },
     }))
     assert_response_code(403, response)
-    assert_match("API_KEY_MISSING", response.body)
+    assert_match("API_KEY_OR_TOKEN_MISSING", response.body)
   end
 
   def test_denies_requests_passing_key_in_password_not_username
@@ -60,7 +60,7 @@ class Test::Proxy::ApiKeyValidation::TestBasicAuthParsing < Minitest::Test
       },
     }))
     assert_response_code(403, response)
-    assert_match("API_KEY_MISSING", response.body)
+    assert_match("API_KEY_OR_TOKEN_MISSING", response.body)
   end
 
   def test_denies_incorrect_authorization_scheme
@@ -70,7 +70,7 @@ class Test::Proxy::ApiKeyValidation::TestBasicAuthParsing < Minitest::Test
       },
     }))
     assert_response_code(403, response)
-    assert_match("API_KEY_MISSING", response.body)
+    assert_match("API_KEY_OR_TOKEN_MISSING", response.body)
   end
 
   def test_denies_missing_password_separator
@@ -80,7 +80,7 @@ class Test::Proxy::ApiKeyValidation::TestBasicAuthParsing < Minitest::Test
       },
     }))
     assert_response_code(403, response)
-    assert_match("API_KEY_MISSING", response.body)
+    assert_match("API_KEY_OR_TOKEN_MISSING", response.body)
   end
 
   def test_denies_basic_scheme_without_value_without_space
@@ -90,7 +90,7 @@ class Test::Proxy::ApiKeyValidation::TestBasicAuthParsing < Minitest::Test
       },
     }))
     assert_response_code(403, response)
-    assert_match("API_KEY_MISSING", response.body)
+    assert_match("API_KEY_OR_TOKEN_MISSING", response.body)
   end
 
   def test_denies_basic_scheme_without_value_with_space
@@ -100,7 +100,7 @@ class Test::Proxy::ApiKeyValidation::TestBasicAuthParsing < Minitest::Test
       },
     }))
     assert_response_code(403, response)
-    assert_match("API_KEY_MISSING", response.body)
+    assert_match("API_KEY_OR_TOKEN_MISSING", response.body)
   end
 
   def test_denies_invalid_base64_decodes_to_empty_string
@@ -110,7 +110,7 @@ class Test::Proxy::ApiKeyValidation::TestBasicAuthParsing < Minitest::Test
       },
     }))
     assert_response_code(403, response)
-    assert_match("API_KEY_MISSING", response.body)
+    assert_match("API_KEY_OR_TOKEN_MISSING", response.body)
   end
 
   def test_denies_invalid_base64_non_base64_chars
@@ -120,7 +120,7 @@ class Test::Proxy::ApiKeyValidation::TestBasicAuthParsing < Minitest::Test
       },
     }))
     assert_response_code(403, response)
-    assert_match("API_KEY_MISSING", response.body)
+    assert_match("API_KEY_OR_TOKEN_MISSING", response.body)
   end
 
   def test_denies_invalid_base64_decodes_to_binary
@@ -130,6 +130,6 @@ class Test::Proxy::ApiKeyValidation::TestBasicAuthParsing < Minitest::Test
       },
     }))
     assert_response_code(403, response)
-    assert_match("API_KEY_MISSING", response.body)
+    assert_match("API_KEY_OR_TOKEN_MISSING", response.body)
   end
 end

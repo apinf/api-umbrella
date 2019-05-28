@@ -365,7 +365,7 @@ describe "api-umbrella" do
     http.verify_mode = OpenSSL::SSL::VERIFY_NONE
     response = http.request(Net::HTTP::Get.new(uri.request_uri))
     expect(response.code).to eql("403")
-    expect(response.body).to include("API_KEY_MISSING")
+    expect(response.body).to include("API_KEY_OR_TOKEN_MISSING")
   end
 
   it "gatekeeper blocks invalid key requests" do

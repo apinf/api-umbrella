@@ -51,6 +51,6 @@ class Test::Apis::TestApiUsersValidate < Minitest::Test
     user = FactoryBot.create(:api_user)
     response = Typhoeus.get("https://127.0.0.1:9081/api-umbrella/api-users/#{user.api_key}/validate.json", keyless_http_options)
     assert_response_code(403, response)
-    assert_match("API_KEY_MISSING", response.body)
+    assert_match("API_KEY_OR_TOKEN_MISSING", response.body)
   end
 end

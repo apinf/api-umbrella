@@ -158,7 +158,7 @@ class Test::Proxy::FormattedErrors::TestDataVariables < Minitest::Test
       assert_response_code(403, response)
       assert_equal("application/json", response.headers["content-type"])
       data = MultiJson.load(response.body)
-      assert_equal("API_KEY_MISSING", data["code"])
+      assert_equal("API_KEY_OR_TOKEN_MISSING", data["code"])
       assert_equal("new message", data["message"])
       assert_equal("foo", data["newvar"])
       assert_equal("custom hello", data["custom"])

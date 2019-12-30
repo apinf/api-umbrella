@@ -12,13 +12,13 @@ class Test::Proxy::ApiKeyValidation::TestDeny < Minitest::Test
   def test_no_api_key
     response = Typhoeus.get("http://127.0.0.1:9080/api/hello", keyless_http_options)
     assert_response_code(403, response)
-    assert_match("API_KEY_MISSING", response.body)
+    assert_match("API_KEY_OR_TOKEN_MISSING", response.body)
   end
 
   def test_empty_api_key
     response = Typhoeus.get("http://127.0.0.1:9080/api/hello", keyless_http_options.deep_merge(empty_http_header_options("X-Api-Key")))
     assert_response_code(403, response)
-    assert_match("API_KEY_MISSING", response.body)
+    assert_match("API_KEY_OR_TOKEN_MISSING", response.body)
   end
 
   def test_invalid_api_key

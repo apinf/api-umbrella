@@ -1,0 +1,42 @@
+version: "3.5"
+
+services:
+    mongo:
+        image: mongo:3.6
+        networks:
+            main:
+              aliases:
+                - mongodb.docker
+        volumes:
+            - ./mongo-data:/data/db
+
+    umbrella_elasticsearch:
+        image: elasticsearch:2.4
+        volumes:
+            - ./umbrella-elasticsearch:/usr/share/elasticsearch/data
+        command: elasticsearch -Des.index.max_result_window=50000
+        networks:
+            main:
+              aliases:
+                - elasticsearch.docker
+
+    umbrella:
+        # Image build with Dockerfile-build or Dockerfile-dev-build
+        image: umbrella-dev
+        depends_on:
+            - mongo
+            - umbrella_elasticsearch
+        ports:
+            - 8443:8443
+        volumes:
+          - ./dep-config:/etc/api-umbrella
+          # Mount the source code to allow live software updates while developing
+          - ./src/:/app/src
+        networks:
+            main:
+              aliases:
+                - umbrella.docker
+
+networks:
+  main:
+    external: true

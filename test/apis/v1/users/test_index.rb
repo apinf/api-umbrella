@@ -76,12 +76,15 @@ class Test::Apis::V1::Users::TestIndex < Minitest::Test
       "disable_api_key",
       "error_data",
       "error_templates",
+      "ext_auth_allowed",
       "headers",
       "http_basic_auth",
       "id",
+      "idp_app_id",
       "override_response_headers",
       "pass_api_key_header",
       "pass_api_key_query_param",
+      "rate_limit_cost_header",
       "rate_limit_mode",
       "rate_limits",
       "require_https",
@@ -179,6 +182,10 @@ class Test::Apis::V1::Users::TestIndex < Minitest::Test
 
   def test_search_roles
     assert_data_tables_search(:roles, ["RoleSearchTest1", "RoleSearchTest2", "RoleSearchTest33"], "olesearchtest3")
+  end
+
+  def test_search_counts_with_role_joins
+    assert_data_tables_search(:roles, ["#{unique_test_id}-role1", "#{unique_test_id}-role2", "#{unique_test_id}-role3"], "#{unique_test_id}-role")
   end
 
   def test_order_email

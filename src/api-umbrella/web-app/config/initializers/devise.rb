@@ -24,7 +24,7 @@ Devise.setup do |config|
   # Load and configure the ORM. Supports :active_record (default) and
   # :mongoid (bson_ext recommended) by default. Other ORMs may be
   # available as additional gems.
-  require 'devise/orm/mongoid'
+  require "devise/orm/mongoid"
 
   # ==> Configuration for any authentication mechanism
   # Configure which keys are used when authenticating a user. The default is
@@ -161,7 +161,7 @@ Devise.setup do |config|
   # Email regex used to validate email formats. It simply asserts that
   # one (and only one) @ exists in the given string. This is mainly
   # to give user feedback and not to assert the e-mail validity.
-  config.email_regexp = Regexp.new(ApiUmbrellaConfig[:web][:admin][:email_regex])
+  config.email_regexp = ::Regexp.new(ApiUmbrellaConfig[:web][:admin][:email_regex], ::Regexp::IGNORECASE)
 
   # ==> Configuration for :timeoutable
   # The time you want to timeout the user session without activity. After this

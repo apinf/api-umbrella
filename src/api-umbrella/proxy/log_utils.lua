@@ -1,24 +1,29 @@
-local cjson = require "cjson"
+local config = require "api-umbrella.proxy.models.file_config"
 local escape_uri_non_ascii = require "api-umbrella.utils.escape_uri_non_ascii"
-local iconv = require "iconv"
+local icu_date = require "icu-date"
+local json_encode = require "api-umbrella.utils.json_encode"
 local logger = require "resty.logger.socket"
-local luatz = require "luatz"
 local mongo = require "api-umbrella.utils.mongo"
 local plutils = require "pl.utils"
+local round = require "api-umbrella.utils.round"
 local sha256 = require "resty.sha256"
 local str = require "resty.string"
 local user_agent_parser = require "api-umbrella.proxy.user_agent_parser"
-local utils = require "api-umbrella.proxy.utils"
 
-local cjson_encode = cjson.encode
-local round = utils.round
 local split = plutils.split
 
 local syslog_facility = 16 -- local0
 local syslog_severity = 6 -- info
 local syslog_priority = (syslog_facility * 8) + syslog_severity
 local syslog_version = 1
-local timezone = luatz.get_tz(config["analytics"]["timezone"])
+
+local ZONE_OFFSET = icu_date.fields.ZONE_OFFSET
+local DST_OFFSET = icu_date.fields.DST_OFFSET
+local DAY_OF_WEEK = icu_date.fields.DAY_OF_WEEK
+-- Setup the date object in the analytics timezone, and set the first day of
+-- the week to Mondays for ISO week calculations.
+local date = icu_date.new({ zone_id = config["analytics"]["timezone"] })
+date:set_attribute(icu_date.attributes.FIRST_DAY_OF_WEEK, 2)
 
 local _M = {}
 
@@ -65,9 +70,9 @@ end
 --
 -- Will get stored like this for SQL storage:
 --
--- request_url_path_level1 = /api/
--- request_url_path_level2 = /api/foo/
--- request_url_path_level3 = /api/foo/bar.json
+-- request_url_hierarchy_level1 = /api/
+-- request_url_hierarchy_level2 = /api/foo/
+-- request_url_hierarchy_level3 = /api/foo/bar.json
 --
 -- And gets indexed as this array for ElasticSearch storage:
 --
@@ -84,7 +89,7 @@ end
 -- See:
 -- http://wiki.apache.org/solr/HierarchicalFaceting
 -- http://www.springyweb.com/2012/01/hierarchical-faceting-with-elastic.html
-local function set_url_hierarchy(data)
+function _M.set_url_hierarchy(data)
   -- Remote duplicate slashes (eg foo//bar becomes foo/bar).
   local cleaned_path = ngx.re.gsub(data["request_url_path"], "//+", "/", "jo")
 
@@ -103,15 +108,16 @@ local function set_url_hierarchy(data)
 
   -- Setup top-level host hierarchy for ElasticSearch storage.
   data["request_url_hierarchy"] = {}
-  local host_token = "0/" .. data["request_url_host"]
+  local host_level = data["request_url_host"]
   if #path_parts > 0 then
-    host_token = host_token .. "/"
+    host_level = host_level .. "/"
   end
-  table.insert(data["request_url_hierarchy"], host_token)
+  data["request_url_hierarchy_level0"] = host_level
+  table.insert(data["request_url_hierarchy"], "0/" .. host_level)
 
-  local path_level = "/"
+  local path_tree = "/"
   for index, _ in ipairs(path_parts) do
-    path_level = path_level .. path_parts[index]
+    local path_level = path_parts[index]
 
     -- Add a trailing slash to all parent paths, but not the last path. This
     -- is done for two reasons:
@@ -128,10 +134,11 @@ local function set_url_hierarchy(data)
     end
 
     -- Store in the request_url_path_level(1-6) fields for SQL storage.
-    data["request_url_path_level" .. index] = path_level
+    data["request_url_hierarchy_level" .. index] = path_level
 
     -- Store as an array for ElasticSearch storage.
-    local path_token = index .. "/" .. data["request_url_host"] .. path_level
+    path_tree = path_tree .. path_level
+    local path_token = index .. "/" .. data["request_url_host"] .. path_tree
     table.insert(data["request_url_hierarchy"], path_token)
   end
 end
@@ -147,6 +154,11 @@ end
 -- within that city, so it's not perfect, but for now it'll do.
 local function cache_city_geocode(premature, id, data)
   if premature then
+    return
+  end
+
+  if not data["request_ip_country"] or not data["request_ip_lon"] or not data["request_ip_lat"] then
+    ngx.log(ngx.WARN, "Skipping city location caching for empty location")
     return
   end
 
@@ -175,14 +187,13 @@ local function cache_city_geocode(premature, id, data)
   end
 end
 
-function _M.ignore_request(ngx_ctx, ngx_var)
-  -- Only log API requests (not web app or website backend requests).
+function _M.ignore_request(ngx_ctx)
+  -- Only log API requests (not website backend requests).
   if ngx_ctx.matched_api then
-    -- Don't log some of our internal API calls used to determine if API
-    -- Umbrella is fully started and ready (since logging of these requests
-    -- will likely fail anyway if things aren't ready).
-    local uri = ngx_ctx.original_uri or ngx_var.uri
-    if uri == "/api-umbrella/v1/health" or uri == "/api-umbrella/v1/state" then
+    local settings = ngx_ctx.settings
+
+    -- Don't log some of our internal API calls.
+    if settings and settings["disable_analytics"] then
       return true
     else
       return false
@@ -211,7 +222,12 @@ function _M.cache_new_city_geocode(data)
   -- Only cache the first city location per startup to prevent lots of indexing
   -- churn re-indexing the same city.
   if not ngx.shared.geocode_city_cache:get(id) then
-    ngx.shared.geocode_city_cache:set(id, true)
+    local set_ok, set_err, set_forcible = ngx.shared.geocode_city_cache:set(id, true)
+    if not set_ok then
+      ngx.log(ngx.ERR, "failed to set city in 'geocode_city_cache' shared dict: ", set_err)
+    elseif set_forcible then
+      ngx.log(ngx.WARN, "forcibly set city in 'geocode_city_cache' shared dict (shared dict may be too small)")
+    end
 
     -- Perform the actual cache call in a timer because the http library isn't
     -- supported directly in the log_by_lua context.
@@ -220,57 +236,52 @@ function _M.cache_new_city_geocode(data)
 end
 
 function _M.set_request_ip_geo_fields(data, ngx_var)
-  -- The GeoIP module returns ISO-8859-1 encoded city names, but we need UTF-8
-  -- for inserting into ElasticSearch.
-  local geoip_city = ngx_var.geoip_city
-  if geoip_city then
-    local encoding_converter = iconv.new("utf-8//IGNORE", "iso-8859-1")
-    local geoip_city_encoding_err
-    geoip_city, geoip_city_encoding_err  = encoding_converter:iconv(geoip_city)
-    if geoip_city_encoding_err then
-      ngx.log(ngx.ERR, "encoding error for geoip city: ", geoip_city_encoding_err, geoip_city)
+  data["request_ip_country"] = ngx_var.geoip2_data_country_code
+  data["request_ip_region"] = ngx_var.geoip2_data_subdivision_code
+  data["request_ip_city"] = ngx_var.geoip2_data_city_name
+
+  -- Compatibility with the GeoIP v1 way to store country-less results, by
+  -- mapping certain situations into custom country codes:
+  -- https://dev.maxmind.com/geoip/geoip2/whats-new-in-geoip2/#Custom_Country_Codes
+  -- https://dev.maxmind.com/geoip/legacy/codes/iso3166/
+  if not data["request_ip_country"] then
+    local continent_code = ngx_var.geoip2_data_continent_code
+    if continent_code == "AS" then
+      data["request_ip_country"] = "AP"
+    elseif continent_code == "EU" then
+      data["request_ip_country"] = "EU"
+    elseif ngx_var.geoip2_data_is_anonymous_proxy == "1" then
+      data["request_ip_country"] = "A1"
+    elseif ngx_var.geoip2_data_is_satellite_provider == "1" then
+      data["request_ip_country"] = "A2"
     end
   end
 
-  -- The geoip database returns "00" for unknown regions sometimes:
-  -- http://maxmind.com/download/geoip/kml/index.html Remove these and treat
-  -- these as nil.
-  local geoip_region = ngx_var.geoip_region
-  if geoip_region == "00" then
-    geoip_region = nil
-  end
-
-  data["request_ip_city"] = geoip_city
-  data["request_ip_country"] = ngx_var.geoip_city_country_code
-  data["request_ip_region"] = geoip_region
-
-  local geoip_latitude = ngx_var.geoip_latitude
+  local geoip_latitude = ngx_var.geoip2_data_latitude
   if geoip_latitude then
     data["request_ip_lat"] = tonumber(geoip_latitude)
-    data["request_ip_lon"] = tonumber(ngx_var.geoip_longitude)
+    data["request_ip_lon"] = tonumber(ngx_var.geoip2_data_longitude)
   end
 end
 
 function _M.set_computed_timestamp_fields(data)
-  local utc_sec = data["timestamp_utc"] / 1000
-  local tz_offset = timezone:find_current(utc_sec).gmtoff
-  local tz_sec = utc_sec + tz_offset
-  local tz_time = os.date("!%Y-%m-%d %H:%M:00", tz_sec)
+  -- Generate a string of current timestamp in the analytics timezone.
+  --
+  -- Note that we use os.date instead of icu-date's "format" function, since in
+  -- some microbenchmarks, this approach is faster.
+  date:set_millis(data["timestamp_utc"])
+  local tz_offset = date:get(ZONE_OFFSET) + date:get(DST_OFFSET)
+  local tz_time = os.date("!%Y-%m-%d %H:%M:00", (date:get_millis() + tz_offset) / 1000)
 
   -- Determine the first day in the ISO week (the most recent Monday).
-  local tz_week = luatz.gmtime(tz_sec)
-  if tz_week.wday == 1 then
-    tz_week.day = tz_week.day - 6
-    tz_week:normalize()
-  elseif tz_week.wday > 2 then
-    tz_week.day = tz_week.day - tz_week.wday + 2
-    tz_week:normalize()
-  end
+  date:set(DAY_OF_WEEK, 2)
+  local week_tz_offset = date:get(ZONE_OFFSET) + date:get(DST_OFFSET)
+  local tz_week = os.date("!%Y-%m-%d", (date:get_millis() + week_tz_offset) / 1000)
 
-  data["timestamp_tz_offset"] = tz_offset * 1000
+  data["timestamp_tz_offset"] = tz_offset
   data["timestamp_tz_year"] = string.sub(tz_time, 1, 4) .. "-01-01" -- YYYY-01-01
   data["timestamp_tz_month"] = string.sub(tz_time, 1, 7) .. "-01" -- YYYY-MM-01
-  data["timestamp_tz_week"] = tz_week:strftime("%Y-%m-%d") -- YYYY-MM-DD of first day in ISO week.
+  data["timestamp_tz_week"] = tz_week -- YYYY-MM-DD of first day in ISO week.
   data["timestamp_tz_date"] = string.sub(tz_time, 1, 10) -- YYYY-MM-DD
   data["timestamp_tz_hour"] = string.sub(tz_time, 1, 13) .. ":00:00" -- YYYY-MM-DD HH:00:00
   data["timestamp_tz_minute"] = tz_time -- YYYY-MM-DD HH:MM:00
@@ -302,7 +313,7 @@ function _M.set_computed_url_fields(data, ngx_ctx)
     data["legacy_request_url"] = data["legacy_request_url"] .. "?" .. data["request_url_query"]
   end
 
-  set_url_hierarchy(data)
+  _M.set_url_hierarchy(data)
 end
 
 function _M.set_computed_user_agent_fields(data)
@@ -339,12 +350,13 @@ function _M.normalized_data(data)
     request_url_hierarchy = data["request_url_hierarchy"],
     request_url_host = lowercase_truncate(data["request_url_host"], 200),
     request_url_path = truncate(data["request_url_path"], 4000),
-    request_url_path_level1 = truncate(data["request_url_path_level1"], 40),
-    request_url_path_level2 = truncate(data["request_url_path_level2"], 40),
-    request_url_path_level3 = truncate(data["request_url_path_level3"], 40),
-    request_url_path_level4 = truncate(data["request_url_path_level4"], 40),
-    request_url_path_level5 = truncate(data["request_url_path_level5"], 40),
-    request_url_path_level6 = truncate(data["request_url_path_level6"], 40),
+    request_url_hierarchy_level0 = truncate(data["request_url_hierarchy_level0"], 200),
+    request_url_hierarchy_level1 = truncate(data["request_url_hierarchy_level1"], 200),
+    request_url_hierarchy_level2 = truncate(data["request_url_hierarchy_level2"], 200),
+    request_url_hierarchy_level3 = truncate(data["request_url_hierarchy_level3"], 200),
+    request_url_hierarchy_level4 = truncate(data["request_url_hierarchy_level4"], 200),
+    request_url_hierarchy_level5 = truncate(data["request_url_hierarchy_level5"], 200),
+    request_url_hierarchy_level6 = truncate(data["request_url_hierarchy_level6"], 200),
     request_url_port = tonumber(data["request_url_port"]),
     request_url_query = truncate(data["request_url_query"], 4000),
     request_url_scheme = lowercase_truncate(data["request_url_scheme"], 10),
@@ -397,7 +409,7 @@ function _M.build_syslog_message(data)
     .. " -" -- msgid
     .. " -" -- structured-data
     .. " @cee:" -- CEE-enhanced logging for rsyslog to parse JSON
-    .. cjson_encode({ raw = data }) -- JSON data
+    .. json_encode({ raw = data }) -- JSON data
     .. "\n"
 
   return syslog_message

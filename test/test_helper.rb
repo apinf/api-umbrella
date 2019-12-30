@@ -8,7 +8,7 @@ require "minitest/autorun"
 $LOAD_PATH.unshift(File.dirname(__FILE__))
 
 # Detect the source root directory.
-API_UMBRELLA_SRC_ROOT = File.expand_path('..', __dir__)
+API_UMBRELLA_SRC_ROOT = File.expand_path("..", __dir__)
 if(!File.exist?(File.join(API_UMBRELLA_SRC_ROOT, "src/api-umbrella")))
   raise "The calculated root directory does not appear correct: #{API_UMBRELLA_SRC_ROOT}"
 end
@@ -24,7 +24,6 @@ ENV["PATH"] = [
   "#{API_UMBRELLA_SRC_ROOT}/build/work/test-env/sbin",
   "#{API_UMBRELLA_SRC_ROOT}/build/work/dev-env/bin",
   "#{API_UMBRELLA_SRC_ROOT}/build/work/dev-env/sbin",
-  "#{API_UMBRELLA_SRC_ROOT}/build/work/cmake/bin",
   ENV["PATH"],
 ].join(":")
 

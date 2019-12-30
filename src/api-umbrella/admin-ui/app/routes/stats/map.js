@@ -21,13 +21,10 @@ export default Base.extend({
     region: {
       refreshModel: true,
     },
-    beta_analytics: {
-      refreshModel: true,
-    },
   },
 
   model() {
-    let params = this.get('backendQueryParamValues');
+    let params = this.backendQueryParamValues;
     if(this.validateParams(params)) {
       return StatsMap.find(params);
     } else {

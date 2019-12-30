@@ -38,18 +38,15 @@ class Api::Settings
 
   # Validations
   validates :require_https,
-    :inclusion => { :in => %w(required_return_error transition_return_error optional), :allow_blank => true }
+    :inclusion => { :in => ["required_return_error", "transition_return_error", "optional"], :allow_blank => true }
   validates :api_key_verification_level,
-    :inclusion => { :in => %w(none transition_email required_email), :allow_blank => true }
+    :inclusion => { :in => ["none", "transition_email", "required_email"], :allow_blank => true }
   validates :rate_limit_mode,
-    :inclusion => { :in => %w(unlimited custom custom-header), :allow_blank => true }
-  validates :rate_limit_cost_header,
-    :presence => true,
-    :if => Proc.new { |a| a.rate_limit_mode == "custom-header" }
+    :inclusion => { :in => ["unlimited", "custom"], :allow_blank => true }
   validates :anonymous_rate_limit_behavior,
-    :inclusion => { :in => %w(ip_fallback ip_only), :allow_blank => true }
+    :inclusion => { :in => ["ip_fallback", "ip_only"], :allow_blank => true }
   validates :authenticated_rate_limit_behavior,
-    :inclusion => { :in => %w(all api_key_only), :allow_blank => true }
+    :inclusion => { :in => ["all", "api_key_only"], :allow_blank => true }
   validate :validate_error_data_yaml_strings
   validate :validate_error_data
   validate :validate_ext_app_id
@@ -122,10 +119,10 @@ class Api::Settings
       end
 
       self.error_data = data
-    rescue Psych::SyntaxError => error
+    rescue Psych::SyntaxError => e
       # Ignore YAML errors, we'll deal with validating during
       # validate_error_data_yaml_strings.
-      logger.info("YAML parsing error: #{error.message}")
+      logger.info("YAML parsing error: #{e.message}")
     end
   end
 

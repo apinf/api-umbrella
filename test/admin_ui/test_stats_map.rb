@@ -4,18 +4,19 @@ class Test::AdminUi::TestStatsMap < Minitest::Capybara::Test
   include Capybara::Screenshot::MiniTestPlugin
   include ApiUmbrellaTestHelpers::AdminAuth
   include ApiUmbrellaTestHelpers::DateRangePicker
+  include ApiUmbrellaTestHelpers::Downloads
   include ApiUmbrellaTestHelpers::Setup
 
   def setup
     super
     setup_server
-    ElasticsearchHelper.clean_es_indices(["2014-11", "2015-01", "2015-03"])
+    LogItem.clean_indices!
   end
 
   def test_csv_download
     FactoryBot.create_list(:log_item, 5, :request_at => Time.parse("2015-01-16T06:06:28.816Z").utc, :request_ip_country => "US")
     FactoryBot.create_list(:log_item, 5, :request_at => 1421413588000, :request_ip_country => "CI")
-    LogItem.gateway.refresh_index!
+    LogItem.refresh_indices!
     default_query = JSON.generate({
       "condition" => "AND",
       "rules" => [{
@@ -42,7 +43,6 @@ class Test::AdminUi::TestStatsMap < Minitest::Capybara::Test
       "search" => "",
       "query" => default_query,
       "region" => "world",
-      "beta_analytics" => "false",
     }, uri.query_values)
 
     # Wait for the ajax actions to fetch the graph and tables to both
@@ -53,15 +53,10 @@ class Test::AdminUi::TestStatsMap < Minitest::Capybara::Test
     refute_selector(".busy-blocker")
     click_link "Download CSV"
 
-    # Downloading files via Capybara generally seems flakey, so add an extra
-    # wait.
-    Timeout.timeout(Capybara.default_max_wait_time) do
-      while(page.response_headers["Content-Type"] != "text/csv")
-        sleep(0.1)
-      end
-    end
-    assert_equal(200, page.status_code)
-    assert_equal("text/csv", page.response_headers["Content-Type"])
+    file = download_file
+    assert_equal(".csv", File.extname(file.path))
+    csv = CSV.read(file.path, :encoding => "iso8859-1")
+    assert_equal(["Location", "Hits"], csv[0])
   end
 
   def test_date_range_picker

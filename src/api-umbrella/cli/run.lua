@@ -18,8 +18,17 @@ local function start_perp(config, options)
   local args = {
     "-0", "api-umbrella",
     "-P", path.join(config["run_dir"], "perpboot.pid"),
-    "perpboot",
   }
+
+  -- If we want everything to stdout/stderr, then execute the lower-level perpd
+  -- directly, so perpboot's own rc.log setup doesn't swallow all the logs
+  -- (perpboot also requires rc.log to be setup, so we can't simply disable
+  -- it).
+  if config["log"]["destination"] == "console" then
+    table.insert(args, "perpd")
+  else
+    table.insert(args, "perpboot")
+  end
 
   if options and options["background"] then
     table.insert(args, 1, "-d")

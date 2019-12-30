@@ -1,4 +1,4 @@
-require File.expand_path('boot', __dir__)
+require File.expand_path("boot", __dir__)
 
 require "action_controller/railtie"
 require "action_view/railtie"
@@ -9,6 +9,11 @@ require "sprockets/railtie"
 # Require the gems listed in Gemfile, including any gems
 # you've limited to :test, :development, or :production.
 Bundler.require(*Rails.groups)
+
+if(Rails.env.development? || ENV["RAILS_ASSETS_PRECOMPILE"])
+  require "bootstrap"
+  require "font-awesome-rails"
+end
 
 module ApiUmbrella
   class Application < Rails::Application
@@ -41,13 +46,13 @@ module ApiUmbrella
       # default runtime config file, then fall back to the default.yml file at
       # the top-level of the api-umbrella repo.
       if(config_files.blank?)
-        config_files << File.expand_path('../../../../config/default.yml', __dir__)
+        config_files << File.expand_path("../../../../config/default.yml", __dir__)
 
         if(Rails.env.test?)
           if(ENV["API_UMBRELLA_CONFIG"].present?)
             config_files += ENV["API_UMBRELLA_CONFIG"].split(":")
           else
-            config_files << File.expand_path('../../../../test/config/test.yml', __dir__)
+            config_files << File.expand_path("../../../../test/config/test.yml", __dir__)
           end
         end
       end
@@ -57,24 +62,6 @@ module ApiUmbrella
       config_files.each do |file|
         data = YAML.load_file(file).deep_symbolize_keys
         config.deep_merge!(data)
-      end
-
-      # Set the default host used for web application links (for mailers,
-      # contact URLs, etc).
-      #
-      # By default, pick this up from the `hosts` array where `default` has
-      # been set to true (this gets put on `_default_hostname` for easier
-      # access). But still allow the web host to be explicitly set via
-      # `web.default_host`.
-      if(config[:web][:default_host].blank?)
-        config[:web][:default_host] = config[:_default_hostname]
-
-        # Fallback to something that will at least generate valid URLs if
-        # there's no default, or the default is "*" (since in this context, a
-        # wildcard doesn't make sense for generating URLs).
-        if(config[:web][:default_host].blank? || config[:web][:default_host] == "*")
-          config[:web][:default_host] = "localhost"
-        end
       end
 
       # rubocop:disable Naming/ConstantName

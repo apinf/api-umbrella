@@ -1,9 +1,10 @@
+local config = require "api-umbrella.proxy.models.file_config"
 local matches_hostname = require "api-umbrella.utils.matches_hostname"
+local random_num = require "api-umbrella.utils.random_num"
 local stringx = require "pl.stringx"
 local utils = require "api-umbrella.proxy.utils"
 
 local append_array = utils.append_array
-local gsub = string.gsub
 local set_uri = utils.set_uri
 local match_req_headers = utils.match_req_headers
 local startswith = stringx.startswith
@@ -53,8 +54,10 @@ return function(active_config)
 
   if api and url_match then
     -- Rewrite the URL prefix path.
-    local new_path = gsub(request_path, url_match["_frontend_prefix_matcher"], url_match["backend_prefix"], 1)
-    if new_path ~= request_path then
+    local new_path, _, new_path_err = ngx.re.sub(request_path, url_match["_frontend_prefix_regex"], url_match["backend_prefix"], "jo")
+    if new_path_err then
+      ngx.log(ngx.ERR, "regex error: ", new_path_err)
+    elseif new_path ~= request_path then
       set_uri(new_path)
     end
 
@@ -75,30 +78,19 @@ return function(active_config)
       end
     end
 
-    -- Set the nginx headers that will determine which nginx upstream this
-    -- request gets proxied to.
-    ngx.req.set_header("X-Api-Umbrella-Backend-Scheme", api["backend_protocol"] or "http")
-    ngx.req.set_header("X-Api-Umbrella-Backend-Host", host)
-    ngx.req.set_header("X-Api-Umbrella-Backend-Id", api["_id"])
 
-    -- Set the host on the request that we forward onto the caching server to
-    -- the API backend ID. In combination with TrafficServer's
-    -- proxy.config.url_remap.pristine_host_hdr option, this ensures that each
-    -- API backend's cache remains separate (even if the URL paths are the
-    -- same).
-    --
-    -- The real host that gets forwarded onto the backend is eventually
-    -- replaced with the proper host stored in the X-Api-Umbrella-Backend-Host
-    -- header. But we use the backend ID here for generating the cache key,
-    -- rather than the real host so that separate backends on the same host but
-    -- using different ports also remain in separate cache buckets.
-    --
-    -- TrafficServer 6.1+'s cachekey plugin might be a slightly more elegant
-    -- way to base the cache key on the arbitrary X-Api-Umbrella-Backend-Id
-    -- header once we upgrade to TrafficServer 6. However, since we're
-    -- replacing the host afterwards anyway, using this fake temporary host to
-    -- affect the cache key should be fine.
-    ngx.var.proxy_host_header = api["_id"]
+    local server_index
+    if api["_servers_count"] == 1 then
+      server_index = 1
+    else
+      server_index = random_num(1, api["_servers_count"])
+    end
+    local server = api["servers"][server_index]
+
+    ngx.ctx.proxy_host = host
+    ngx.ctx.proxy_server_scheme = api["backend_protocol"] or "http"
+    ngx.ctx.proxy_server_host = server["host"]
+    ngx.ctx.proxy_server_port = server["port"]
 
     return api, url_match
   else

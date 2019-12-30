@@ -5,7 +5,7 @@ Rails.application.routes.draw do
   get "/_web-app-health", :to => proc { [200, {}, ["OK"]] }
 
   # Mount the API at both /api/ and /api-umbrella/ for backwards compatibility.
-  %w(api api-umbrella).each do |path|
+  ["api", "api-umbrella"].each do |path|
     namespace(:api, :path => path) do
       resources :api_users, :path => "api-users" do
         member do

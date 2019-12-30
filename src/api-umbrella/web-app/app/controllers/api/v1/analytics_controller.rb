@@ -18,7 +18,7 @@ class Api::V1::AnalyticsController < Api::V1::BaseController
     @search.query!(params[:query])
     @search.filter_by_date_range!
 
-    drilldown_size = if(request.format == "csv") then 0 else 500 end
+    drilldown_size = if(request.format == "csv") then nil else 500 end
     @search.aggregate_by_drilldown!(params[:prefix], drilldown_size)
 
     if(request.format != "csv")
@@ -28,7 +28,9 @@ class Api::V1::AnalyticsController < Api::V1::BaseController
     @result = @search.result
 
     respond_to do |format|
-      format.csv
+      format.csv do
+        @filename = "api_drilldown_#{Time.now.utc.strftime("%Y-%m-%d")}.csv"
+      end
       format.json do
         @breadcrumbs = [
           :crumb => "All Hosts",
@@ -51,48 +53,50 @@ class Api::V1::AnalyticsController < Api::V1::BaseController
           :rows => [],
         }
 
-        @result.aggregations["top_path_hits_over_time"]["buckets"].each do |bucket|
-          @hits_over_time[:cols] << {
-            :id => bucket["key"],
-            :label => bucket["key"].split("/", 2).last,
-            :type => "number",
-          }
-        end
-
-        has_other_hits = false
-        @result.aggregations["hits_over_time"]["buckets"].each_with_index do |total_bucket, index|
-          cells = [
-            { :v => total_bucket["key"], :f => formatted_interval_time(total_bucket["key"]) },
-          ]
-
-          path_total_hits = 0
-          @result.aggregations["top_path_hits_over_time"]["buckets"].each do |path_bucket|
-            bucket = path_bucket["drilldown_over_time"]["buckets"][index]
-            cells << { :v => bucket["doc_count"], :f => number_with_delimiter(bucket["doc_count"]) }
-            path_total_hits += bucket["doc_count"]
+        if @result.aggregations
+          @result.aggregations["top_path_hits_over_time"]["buckets"].each do |bucket|
+            @hits_over_time[:cols] << {
+              :id => bucket["key"],
+              :label => bucket["key"].split("/", 2).last,
+              :type => "number",
+            }
           end
 
-          other_hits = total_bucket["doc_count"] - path_total_hits
-          cells << { :v => other_hits, :f => number_with_delimiter(other_hits) }
+          has_other_hits = false
+          @result.aggregations["hits_over_time"]["buckets"].each_with_index do |total_bucket, index|
+            cells = [
+              { :v => total_bucket["key"], :f => formatted_interval_time(total_bucket["key"]) },
+            ]
 
-          @hits_over_time[:rows] << {
-            :c => cells,
-          }
+            path_total_hits = 0
+            @result.aggregations["top_path_hits_over_time"]["buckets"].each do |path_bucket|
+              bucket = path_bucket["drilldown_over_time"]["buckets"][index]
+              cells << { :v => bucket["doc_count"], :f => number_with_delimiter(bucket["doc_count"]) }
+              path_total_hits += bucket["doc_count"]
+            end
 
-          if(other_hits > 0)
-            has_other_hits = true
+            other_hits = total_bucket["doc_count"] - path_total_hits
+            cells << { :v => other_hits, :f => number_with_delimiter(other_hits) }
+
+            @hits_over_time[:rows] << {
+              :c => cells,
+            }
+
+            if(other_hits > 0)
+              has_other_hits = true
+            end
           end
-        end
 
-        if(has_other_hits)
-          @hits_over_time[:cols] << {
-            :id => "other",
-            :label => "Other",
-            :type => "number",
-          }
-        else
-          @hits_over_time[:rows].each do |row|
-            row[:c].slice!(-1)
+          if(has_other_hits)
+            @hits_over_time[:cols] << {
+              :id => "other",
+              :label => "Other",
+              :type => "number",
+            }
+          else
+            @hits_over_time[:rows].each do |row|
+              row[:c].slice!(-1)
+            end
           end
         end
       end
@@ -100,16 +104,8 @@ class Api::V1::AnalyticsController < Api::V1::BaseController
   end
 
   def logs
-    # TODO: For the SQL fetching, set start_time to end_time to limit to last
-    # 24 hours. If we do end up limiting it to the last 24 hours by default,
-    # figure out a better way to document this and still allow downloading
-    # the full data set.
-    start_time = params[:start_at]
-    if(@analytics_adapter == "kylin")
-      start_time = Time.zone.parse(params[:end_at]) - 1.day
-    end
     @search = LogSearch.factory(@analytics_adapter, {
-      :start_time => start_time,
+      :start_time => params[:start_at],
       :end_time => params[:end_at],
       :interval => params[:interval],
     })
@@ -134,8 +130,8 @@ class Api::V1::AnalyticsController < Api::V1::BaseController
     end
 
     if(request.format == "csv")
-      @search.query_options[:search_type] = "scan"
       @search.query_options[:scroll] = "10m"
+      @search.query_options[:sort] = ["_doc"]
     end
 
     @result = @search.result
@@ -147,7 +143,27 @@ class Api::V1::AnalyticsController < Api::V1::BaseController
         # http://stackoverflow.com/a/10252798/222487
         response.headers["Last-Modified"] = Time.now.utc.httpdate
 
-        headers = ["Time", "Method", "Host", "URL", "User", "IP Address", "Country", "State", "City", "Status", "Reason Denied", "Response Time", "Content Type", "Accept Encoding", "User Agent"]
+        headers = [
+          "Time",
+          "Method",
+          "Host",
+          "URL",
+          "User",
+          "IP Address",
+          "Country",
+          "State",
+          "City",
+          "Status",
+          "Reason Denied",
+          "Response Time",
+          "Content Type",
+          "Accept Encoding",
+          "User Agent",
+          "User Agent Family",
+          "User Agent Type",
+          "Referer",
+          "Origin",
+        ]
 
         send_file_headers!(:disposition => "attachment", :filename => "api_logs (#{Time.now.utc.strftime("%b %-e %Y")}).#{params[:format]}")
         self.response_body = CsvStreamer.new(@result, headers) do |row|

@@ -80,7 +80,7 @@ class Test::Proxy::Logging::TestIpGeocoding < Minitest::Test
       :ip => "104.250.168.24",
       :country => "MC",
       :region => nil,
-      :city => "Monte-carlo",
+      :city => "Monte Carlo",
       :lat => 43.7333,
       :lon => 7.4167,
     })
@@ -89,38 +89,133 @@ class Test::Proxy::Logging::TestIpGeocoding < Minitest::Test
   def test_country_no_region_city
     response = Typhoeus.get("http://127.0.0.1:9080/api/hello", log_http_options.deep_merge({
       :headers => {
-        "X-Forwarded-For" => "67.43.156.1",
+        "X-Forwarded-For" => "1.1.1.1",
       },
     }))
     assert_response_code(200, response)
 
     record = wait_for_log(response)[:hit_source]
     assert_geocode(record, {
-      :ip => "67.43.156.1",
-      :country => "A1",
+      :ip => "1.1.1.1",
+      :country => "AU",
       :region => nil,
       :city => nil,
-      :lat => 0.0,
-      :lon => 0.0,
+      :lat => -33.494,
+      :lon => 143.2104,
+    })
+  end
+
+  def test_no_country_region_city
+    response = Typhoeus.get("http://127.0.0.1:9080/api/hello", log_http_options.deep_merge({
+      :headers => {
+        "X-Forwarded-For" => "127.0.0.1",
+      },
+    }))
+    assert_response_code(200, response)
+
+    record = wait_for_log(response)[:hit_source]
+    assert_geocode(record, {
+      :ip => "127.0.0.1",
+      :country => nil,
+      :region => nil,
+      :city => nil,
+      :lat => nil,
+      :lon => nil,
     })
   end
 
   def test_city_accent_chars
     response = Typhoeus.get("http://127.0.0.1:9080/api/hello", log_http_options.deep_merge({
       :headers => {
-        "X-Forwarded-For" => "178.203.88.46",
+        "X-Forwarded-For" => "184.148.224.214",
       },
     }))
     assert_response_code(200, response)
 
     record = wait_for_log(response)[:hit_source]
     assert_geocode(record, {
-      :ip => "178.203.88.46",
-      :country => "DE",
-      :region => "07",
-      :city => "Düsseldorf",
-      :lat => 51.216499,
-      :lon => 6.783600,
+      :ip => "184.148.224.214",
+      :country => "CA",
+      :region => "QC",
+      :city => "Trois-Rivières",
+      :lat => 46.316,
+      :lon => -72.6833,
+    })
+  end
+
+  def test_custom_country_asia
+    response = Typhoeus.get("http://127.0.0.1:9080/api/hello", log_http_options.deep_merge({
+      :headers => {
+        "X-Forwarded-For" => "169.145.197.0",
+      },
+    }))
+    assert_response_code(200, response)
+
+    record = wait_for_log(response)[:hit_source]
+    assert_geocode(record, {
+      :ip => "169.145.197.0",
+      :country => "AP",
+      :region => nil,
+      :city => nil,
+      :lat => 35.0,
+      :lon => 105.0,
+    })
+  end
+
+  def test_custom_country_europe
+    response = Typhoeus.get("http://127.0.0.1:9080/api/hello", log_http_options.deep_merge({
+      :headers => {
+        "X-Forwarded-For" => "165.225.72.0",
+      },
+    }))
+    assert_response_code(200, response)
+
+    record = wait_for_log(response)[:hit_source]
+    assert_geocode(record, {
+      :ip => "165.225.72.0",
+      :country => "EU",
+      :region => nil,
+      :city => nil,
+      :lat => 47.0,
+      :lon => 8.0,
+    })
+  end
+
+  def test_custom_country_anonymous_proxy
+    response = Typhoeus.get("http://127.0.0.1:9080/api/hello", log_http_options.deep_merge({
+      :headers => {
+        "X-Forwarded-For" => "67.43.156.0",
+      },
+    }))
+    assert_response_code(200, response)
+
+    record = wait_for_log(response)[:hit_source]
+    assert_geocode(record, {
+      :ip => "67.43.156.0",
+      :country => "A1",
+      :region => nil,
+      :city => nil,
+      :lat => nil,
+      :lon => nil,
+    })
+  end
+
+  def test_custom_country_satellite
+    response = Typhoeus.get("http://127.0.0.1:9080/api/hello", log_http_options.deep_merge({
+      :headers => {
+        "X-Forwarded-For" => "196.201.135.0",
+      },
+    }))
+    assert_response_code(200, response)
+
+    record = wait_for_log(response)[:hit_source]
+    assert_geocode(record, {
+      :ip => "196.201.135.0",
+      :country => "A2",
+      :region => nil,
+      :city => nil,
+      :lat => nil,
+      :lon => nil,
     })
   end
 
@@ -128,12 +223,19 @@ class Test::Proxy::Logging::TestIpGeocoding < Minitest::Test
 
   def assert_geocode(record, options)
     assert_geocode_log(record, options)
-    assert_geocode_cache(record, options)
+    if !options.fetch(:lat).nil? || !options.fetch(:lon).nil?
+      assert_geocode_cache(record, options)
+    end
   end
 
   def assert_geocode_log(record, options)
     assert_equal(options.fetch(:ip), record.fetch("request_ip"))
-    assert_equal(options.fetch(:country), record.fetch("request_ip_country"))
+    if(options.fetch(:country).nil?)
+      assert_nil(record["request_ip_country"])
+      refute(record.key?("request_ip_country"))
+    else
+      assert_equal(options.fetch(:country), record.fetch("request_ip_country"))
+    end
     if(options.fetch(:region).nil?)
       assert_nil(record["request_ip_region"])
       refute(record.key?("request_ip_region"))

@@ -1,6 +1,8 @@
 import Component from '@ember/component';
+import bootbox from 'bootbox';
 import { computed } from '@ember/object';
 import { inject } from '@ember/service';
+import uniqueId from 'lodash-es/uniqueId';
 
 export default Component.extend({
   store: inject(),
@@ -30,7 +32,7 @@ export default Component.extend({
   },
 
   uniqueSettingsId: computed(function() {
-    return _.uniqueId('api_settings_');
+    return uniqueId('api_settings_');
   }),
 
   actions: {
@@ -47,7 +49,7 @@ export default Component.extend({
 
     addRateLimit() {
       let collection = this.get('model.rateLimits');
-      collection.pushObject(this.get('store').createRecord('api/rate-limit'));
+      collection.pushObject(this.store.createRecord('api/rate-limit'));
     },
 
     deleteRateLimit(rateLimit) {

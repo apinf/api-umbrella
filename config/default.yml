@@ -11,14 +11,21 @@ rlimits:
   nproc: 20000
 http_port: 80
 https_port: 443
+listen:
+  addresses:
+    - "*"
+    - "[::]"
 nginx:
   workers: auto
   worker_connections: 8192
+  error_log_level: warn
   access_log_filename: access.log
   access_log_options: buffer=256k flush=10s
   proxy_connect_timeout: 60
   proxy_read_timeout: 60
   proxy_send_timeout: 60
+  proxy_buffer_size: 8k
+  proxy_buffers: 8 8k
   keepalive_timeout: 75
   ssl_protocols: "TLSv1 TLSv1.1 TLSv1.2"
   ssl_ciphers: "ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA:ECDHE-RSA-AES256-SHA384:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA:ECDHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA256:DHE-RSA-AES128-SHA:DHE-RSA-AES256-SHA256:DHE-RSA-AES256-SHA:ECDHE-ECDSA-DES-CBC3-SHA:ECDHE-RSA-DES-CBC3-SHA:EDH-RSA-DES-CBC3-SHA:AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA256:AES256-SHA256:AES128-SHA:AES256-SHA:DES-CBC3-SHA:!DSS"
@@ -30,29 +37,21 @@ nginx:
   ssl_ecdh_curve: secp384r1
   lua_ssl_trusted_certificate:
   lua_ssl_verify_depth: 1
-  dyups:
-    host: 127.0.0.1
-    port: 14005
   shared_dicts:
     active_config:
       size: 3m
     api_users:
       size: 3m
-    dns_cache:
-      size: 300k
     geocode_city_cache:
       size: 100k
     interval_locks:
       size: 20k
     locks:
       size: 20k
-    resolved_hosts:
-      size: 100k
     stats:
       size: 20m
     upstream_checksums:
       size: 200k
-  _reloader_frequency: 14400 # 4 hours
 gatekeeper:
   api_key_methods:
     - fiware-oauth2
@@ -67,14 +66,16 @@ gatekeeper:
     - github-oauth2
     - facebook-oauth2
     - google-oauth2
+    - keycloak-oauth2
   default_idp:
     backend_name: fiware-oauth2
     host: http://idm.docker:3000
+    realm: demo
+    jwt_enabled: false
+    key: pubkey
 trafficserver:
   host: 127.0.0.1
   port: 14009
-  autoconf_port: 14007
-  management_port: 14008
   storage:
     size: 256M
   embedded_server_config:
@@ -92,6 +93,7 @@ web:
     min_threads: 2
     max_threads: 24
   api_user:
+    email_regex: "\\A[^@\\s]+@[^@\\s]+\\.[^@\\s]+\\z"
     first_name_exclude_regex: "(http|https|www|<|>|\\r|\\n)"
     last_name_exclude_regex: "(http|https|www|<|>|\\r|\\n)"
   admin:
@@ -99,13 +101,17 @@ web:
     username_is_email: true
     password_length_min: 14
     password_length_max: 72
-    email_regex: "\\A[^@\\s]+@[^@\\s]+\\z"
+    email_regex: "\\A[^@\\s]+@[^@\\s]+\\.[^@\\s]+\\z"
     password_regex:
     auth_strategies:
       enabled:
         - local
       cas:
-        options: {}
+        options:
+          service_validate_url: /serviceValidate
+          login_url: /login
+          logout_url: /logout
+          ssl: true
       facebook:
         client_id:
         client_secret:
@@ -119,9 +125,18 @@ web:
         client_id:
         client_secret:
       ldap:
-        options: {}
+        options:
+          port: 389
+          method: plain
+          uid: sAMAccountName
       max.gov:
         require_mfa: true
+        options:
+          host: login.max.gov
+          login_url: /cas/login
+          service_validate_url: /cas/serviceValidate
+          logout_url: /cas/logout
+          ssl: true
   mailer:
     smtp_settings:
 static_site:
@@ -129,9 +144,8 @@ static_site:
   port: 14013
 router:
   api_backends:
-    host: 127.0.0.1
-    port: 14011
-    keepalive_connections: 10
+    keepalive_connections: 20
+    keepalive_idle_timeout: 120
   trusted_proxies: []
   global_rate_limits:
     ip_rate:
@@ -142,18 +156,34 @@ router:
     ip_connections_size: 5m
     ip_connections_log_level: error
   web_app_host: "*"
-  web_app_backend_regex: "^/(admin|admins|web-assets)(/|$)"
-  web_app_backend_required_https_regex: "^.*"
   website_backend_required_https_regex_default: "^.*"
   redirect_not_found_to_https: true
+auto_ssl:
+  workers: 1
+  worker_connections: 8192
+  http:
+    port: 14005
+  https:
+    port: 14006
+  user: api-umbrella-auto-ssl
+  group: api-umbrella-auto-ssl
+  hook_server:
+    port: 14007
 rsyslog:
   host: 127.0.0.1
   port: 14014
+log:
+  destination: file
 dns_resolver:
   negative_ttl: 60
   max_stale: 86400
   timeout: 2000
   retries: 3
+  # This default could be revisited, but historically we didn't resolve AAAA
+  # records for API backends, so for compatibility keep this disabled by
+  # default. Enabling may also break certain hosting environments that still
+  # aren't IPv6 compatible.
+  allow_ipv6: false
 mongodb:
   url: "mongodb://127.0.0.1:14001/api_umbrella"
   read_preference: primaryPreferred
@@ -173,6 +203,7 @@ elasticsearch:
   embedded_server_env:
     heap_size: 512m
   api_version: 2
+  template_version: 1
   embedded_server_config:
     network:
       host: 127.0.0.1
@@ -190,42 +221,15 @@ elasticsearch:
       breaker:
         fielddata:
           limit: 60%
-    index:
-      translog:
-        # Sync the data to disk asynchronously on a fixed interval, rather than
-        # for every request. This significantly helps indexing throughput (at
-        # the risk of losing a few seconds of data if things crash).
-        durability: async
-        sync_interval: 10s
+  aws_signing_proxy:
+    host: 127.0.0.1
+    port: 14017
+    workers: 1
+    error_log_level: notice
 analytics:
   adapter: elasticsearch
   timezone: UTC
   log_request_url_query_params_separately: false
-kylin:
-  protocol: http
-  host: 127.0.0.1
-  port: 7070
-presto:
-  protocol: http
-  host: 127.0.0.1
-  port: 14015
-  embedded_server_config:
-    http_port: 14015
-    max_memory: 2GB
-    max_memory_per_node: 1GB
-    discovery_uri: http://127.0.0.1:14015
-    query_max_run_time: 60s
-    hive:
-      metastore_uri: thrift://127.0.0.1:9083
-flume:
-  host: 127.0.0.1
-  port: 14016
-  embedded_server_config:
-    java_opts:
-kafka:
-  brokers: []
-  topic: api_umbrella_logs
-log_template_version: v1
 strip_cookies:
   - ^__utm.*$
   - ^_ga$
@@ -334,7 +338,7 @@ internal_apis:
   - _id: api-umbrella-gatekeeper-backend
     name: API Umbrella - Gatekeeper APIs
     frontend_host: "{{router.web_app_host}}"
-    backend_host: 127.0.0.1
+    backend_host: ~
     backend_protocol: http
     balance_algorithm: least_conn
     sort_order: 1
@@ -346,6 +350,8 @@ internal_apis:
         backend_prefix: "/api-umbrella/v1/health"
       - frontend_prefix: "/api-umbrella/v1/state"
         backend_prefix: "/api-umbrella/v1/state"
+    settings:
+      require_https: required_return_error
     sub_settings:
       - http_method: get
         regex: "^/api-umbrella/v1/(health|state)"
@@ -353,24 +359,58 @@ internal_apis:
           disable_api_key: true
           rate_limit_mode: unlimited
           require_https: optional
-  - _id: api-umbrella-web-backend
-    name: API Umbrella - Web APIs
+          disable_analytics: true
+  - _id: api-umbrella-web-app-backend
+    name: API Umbrella - HTTP APIs
     frontend_host: "{{router.web_app_host}}"
-    backend_host: 127.0.0.1
+    backend_host: ~
     backend_protocol: http
     balance_algorithm: least_conn
-    sort_order: 1
+    sort_order: 2
     servers:
       - host: "{{web.host}}"
         port: "{{web.port}}"
     url_matches:
       - frontend_prefix: "/api-umbrella/"
         backend_prefix: "/api-umbrella/"
+      - frontend_prefix: "/admin/"
+        backend_prefix: "/admin/"
+      - frontend_prefix: "/admin"
+        backend_prefix: "/admin"
+        exact_match: true
+      - frontend_prefix: "/admins/"
+        backend_prefix: "/admins/"
+      - frontend_prefix: "/admins"
+        backend_prefix: "/admins"
+        exact_match: true
+      - frontend_prefix: "/web-assets/"
+        backend_prefix: "/web-assets/"
+    settings:
+      require_https: required_return_error
     sub_settings:
-      - http_method: post
-        regex: "^/api-umbrella/v1/users"
-      - http_method: post
-        regex: "^/api-umbrella/v1/contact"
+      - http_method: any
+        regex: "^/admin/stats"
+        settings:
+          disable_api_key: true
+      - http_method: POST
+        regex: "^/admin/login"
+        settings:
+          disable_api_key: true
+          rate_limit_mode: custom
+          rate_limits:
+            - duration: 15000
+              accuracy: 1000
+              limit_by: ip
+              limit: 100
+              distributed: true
+              response_headers: true
+      - http_method: any
+        regex: "^/(admin|web-assets)"
+        settings:
+          disable_api_key: true
+          rate_limit_mode: unlimited
+          redirect_https: true
+          disable_analytics: true
 internal_website_backends:
   - _id: api-umbrella-website-backend
     frontend_host: "{{router.web_app_host}}"
@@ -387,3 +427,8 @@ ban:
 ember_server:
   port: 14050
   live_reload_port: 14051
+umask: "0027"
+_test_config:
+  default_null_override_hash:
+  default_null_override_string:
+  default_empty_hash_override_hash: {}

@@ -1,18 +1,26 @@
 local array_includes = require "api-umbrella.utils.array_includes"
 local array_last = require "api-umbrella.utils.array_last"
+local deep_defaults = require "api-umbrella.utils.deep_defaults"
 local deep_merge_overwrite_arrays = require "api-umbrella.utils.deep_merge_overwrite_arrays"
 local dir = require "pl.dir"
 local file = require "pl.file"
+local getgrgid = require("posix.grp").getgrgid
+local getpwuid = require("posix.pwd").getpwuid
 local host_normalize = require "api-umbrella.utils.host_normalize"
+local invert_table = require "api-umbrella.utils.invert_table"
 local lyaml = require "lyaml"
 local nillify_yaml_nulls = require "api-umbrella.utils.nillify_yaml_nulls"
 local path = require "pl.path"
 local plutils = require "pl.utils"
 local random_token = require "api-umbrella.utils.random_token"
+local stat = require "posix.sys.stat"
 local stringx = require "pl.stringx"
 local types = require "pl.types"
+local unistd = require "posix.unistd"
 local url = require "socket.url"
 
+local chmod = stat.chmod
+local chown = unistd.chown
 local is_empty = types.is_empty
 local split = plutils.split
 local strip = stringx.strip
@@ -152,20 +160,24 @@ local function set_computed_config()
     config["etc_dir"] = path.join(config["root_dir"], "etc")
   end
 
+  if not config["var_dir"] then
+    config["var_dir"] = path.join(config["root_dir"], "var")
+  end
+
   if not config["log_dir"] then
-    config["log_dir"] = path.join(config["root_dir"], "var/log")
+    config["log_dir"] = path.join(config["var_dir"], "log")
   end
 
   if not config["run_dir"] then
-    config["run_dir"] = path.join(config["root_dir"], "var/run")
+    config["run_dir"] = path.join(config["var_dir"], "run")
   end
 
   if not config["tmp_dir"] then
-    config["tmp_dir"] = path.join(config["root_dir"], "var/tmp")
+    config["tmp_dir"] = path.join(config["var_dir"], "tmp")
   end
 
   if not config["db_dir"] then
-    config["db_dir"] = path.join(config["root_dir"], "var/db")
+    config["db_dir"] = path.join(config["var_dir"], "db")
   end
 
   local trusted_proxies = config["router"]["trusted_proxies"] or {}
@@ -190,14 +202,23 @@ local function set_computed_config()
     end
   end
 
-  -- Add a default fallback host that will match any hostname, but doesn't
-  -- include any host-specific settings in nginx (like rewrites). This host can
-  -- still then be used to match APIs for unknown hosts.
-  table.insert(config["hosts"], {
-    hostname = "*",
-    _nginx_server_name = "_",
-    default = (not default_host_exists),
-  })
+  -- If a default host hasn't been explicitly defined, then add a default
+  -- fallback host that will match any hostname (but doesn't include any
+  -- host-specific settings in nginx, like rewrites). A default host is
+  -- necessary so nginx handles all hostnames, allowing APIs to be matched for
+  -- hosts that are only defined in the API backend configuration.
+  if not default_host_exists then
+    table.insert(config["hosts"], {
+      hostname = "*",
+      -- Use a slightly different nginx server name to avoid any conflicts with
+      -- explicitly defined wildcard hosts (but aren't the default, which
+      -- doesn't seem particularly likely). There's nothing actually special
+      -- about "_" in nginx, it's just a hostname that won't match anything
+      -- real.
+      _nginx_server_name = "__",
+      default = true,
+    })
+  end
 
   local default_hostname
   if config["hosts"] then
@@ -212,6 +233,27 @@ local function set_computed_config()
   if default_hostname then
     config["_default_hostname"] = default_hostname
     config["_default_hostname_normalized"] = host_normalize(default_hostname)
+  end
+
+  if not config["web"] then
+    config["web"] = {}
+  end
+
+  -- Set the default host used for web application links (for mailers, contact
+  -- URLs, etc).
+  --
+  -- By default, pick this up from the `hosts` array where `default` has been
+  -- set to true (this gets put on `_default_hostname` for easier access). But
+  -- still allow the web host to be explicitly set via `web.default_host`.
+  if not config["web"]["default_host"] then
+    config["web"]["default_host"] = config["_default_hostname"]
+
+    -- Fallback to something that will at least generate valid URLs if there's
+    -- no default, or the default is "*" (since in this context, a wildcard
+    -- doesn't make sense for generating URLs).
+    if not config["web"]["default_host"] or config["web"]["default_host"] == "*" then
+      config["web"]["default_host"] = "localhost"
+    end
   end
 
   -- Determine the nameservers for DNS resolution. Prefer explicitly configured
@@ -244,7 +286,12 @@ local function set_computed_config()
     table.insert(config["dns_resolver"]["_nameservers"], nameserver)
   end
   config["dns_resolver"]["_nameservers_nginx"] = table.concat(config["dns_resolver"]["_nameservers_nginx"], " ")
+  config["dns_resolver"]["_nameservers_trafficserver"] = config["dns_resolver"]["_nameservers_nginx"]
   config["dns_resolver"]["nameservers"] = nil
+
+  if not config["dns_resolver"]["allow_ipv6"] then
+    config["dns_resolver"]["_nameservers_nginx"] = config["dns_resolver"]["_nameservers_nginx"] .. " ipv6=off"
+  end
 
   config["dns_resolver"]["_etc_hosts"] = read_etc_hosts()
 
@@ -273,12 +320,6 @@ local function set_computed_config()
     config["analytics"]["outputs"] = { config["analytics"]["adapter"] }
   end
 
-  config["kafka"]["_rsyslog_broker"] = {}
-  for _, broker in ipairs(config["kafka"]["brokers"]) do
-    table.insert(config["kafka"]["_rsyslog_broker"], '"' .. broker["host"] .. ":" .. broker["port"] .. '"')
-  end
-  config["kafka"]["_rsyslog_broker"] = table.concat(config["kafka"]["_rsyslog_broker"], ",")
-
   -- Setup the request/response timeouts for the different pieces of the stack.
   -- Since we traverse multiple proxies, we want to make sure the timeouts of
   -- the different proxies are kept in sync.
@@ -286,45 +327,114 @@ local function set_computed_config()
   -- We will actually stagger the timeouts slightly at each proxy layer to
   -- prevent race conditions. Since the flow of the requests looks like:
   --
-  -- [incoming request] => [initial nginx proxy] => [trafficserver] => [api routing nginx proxy] => [api backends]
+  -- [incoming request] => [initial nginx proxy] => [trafficserver] => [api backends]
   --
-  -- Our real timeouts defined in the config file will be enforced at the "api
-  -- routing nginx proxy" layer. We increase our timeouts on the proxies
-  -- further out to prevent race conditions if all the pieces of the stack
-  -- timeout at the exact same time. This results in a timeout error regardless
-  -- of which stack returns the timeout error, but by staggering them, it makes
-  -- it more predictable and easier to test against if we always know the api
-  -- router is what should trigger the initial timeout. This also prevents the
-  -- proxies further back in the stack from thinking the client unexpectedly
-  -- hung up on the request.
-  config["trafficserver"]["_connect_attempts_timeout"] = config["nginx"]["proxy_read_timeout"] + 1
-  config["trafficserver"]["_transaction_no_activity_timeout_out"] = config["nginx"]["proxy_read_timeout"] + 1
-  config["trafficserver"]["_transaction_no_activity_timeout_in"] = config["nginx"]["proxy_read_timeout"] + 1
-  config["nginx"]["_initial_proxy_connect_timeout"] = config["nginx"]["proxy_connect_timeout"] + 2
+  -- Notes:
+  --
+  -- * Trafficserver's "connect_attempts_timeout" isn't really a connection
+  --   timeout, but instead is a timeout for when the first byte back is
+  --   received: https://issues.apache.org/jira/browse/TS-242
+  --
+  --   If Trafficserver implements a real connection timeout, this can be
+  --   revisited, but in the meantime, this means that the connect timeouts
+  --   need to really reflect our read timeout (how soon we expect the
+  --   beginnings of a response back from the API backend), in addition to any
+  --   time spent connecting (which should normally be quick).
+  --
+  --   We also want Trafficserver's connect timeout to be higher than the
+  --   initial nginx layer's timeouts. This setup allows for us for us to
+  --   enable Trafficserver's retry capabilities (connect_attempts_max_retries)
+  --   so that we can retry requests that quickly fail (eg, due to dropped
+  --   keepalive connections), without retrying slow connections. Since slow
+  --   connections will be killed by the initial nginx layer's shorter timeout
+  --   first, that should prevent Trafficserver from retrying a second time if
+  --   the backend is actually taking a long time to respond (since we don't
+  --   want to overwhelm a server if it's struggling).
+  -- * The read timeout, or the timeout between bytes being received from a
+  --   backend, is handled with the Trafficserver activity timeouts. We add a
+  --   buffer to this timeout at the nginx layer to allow for Trafficserver to
+  --   handle the real timeout value (so Trafficserver doesn't think the client
+  --   has hung up the connection too early).
+  --
+  --   Note that both "in" and "out" timeouts need to be adjusted based on the
+  --   read timeout (the "in" timeout shouldn't necessarily reflect the
+  --   "proxy_send_timeout"--I think Trafficserver's
+  --   "accept_no_activity_timeout" is closer to nginx's concept of
+  --   "proxy_send_timeout").
+  -- * The send timeout, or the timeout between bytes being received from the
+  --   client request, is handled at the nginx layer. Since this is the initial
+  --   layer receiving the requests, it makes most sense to handle this timeout
+  --   at this first layer.
+  config["trafficserver"]["_connect_attempts_timeout"] = config["nginx"]["proxy_connect_timeout"] + config["nginx"]["proxy_read_timeout"] + 2
+  config["trafficserver"]["_post_connect_attempts_timeout"] = config["trafficserver"]["_connect_attempts_timeout"]
+  config["trafficserver"]["_transaction_no_activity_timeout_out"] = config["nginx"]["proxy_read_timeout"]
+  config["trafficserver"]["_transaction_no_activity_timeout_in"] = config["nginx"]["proxy_read_timeout"]
+  config["nginx"]["_initial_proxy_connect_timeout"] = config["nginx"]["proxy_connect_timeout"]
   config["nginx"]["_initial_proxy_read_timeout"] = config["nginx"]["proxy_read_timeout"] + 2
-  config["nginx"]["_initial_proxy_send_timeout"] = config["nginx"]["proxy_send_timeout"] + 2
+  config["nginx"]["_initial_proxy_send_timeout"] = config["nginx"]["proxy_send_timeout"]
+
+  if not config["user"] then
+    local euid = unistd.geteuid()
+    if euid then
+      local user = getpwuid(euid)
+      if user then
+        config["_effective_user_id"] = user.pw_uid
+        config["_effective_user_name"] = user.pw_name
+      end
+    end
+  end
+
+  if not config["group"] then
+    local egid = unistd.getegid()
+    if egid then
+      local group = getgrgid(egid)
+      if group then
+        config["_effective_group_id"] = group.gr_gid
+        config["_effective_group_name"] = group.gr_name
+      end
+    end
+  end
 
   deep_merge_overwrite_arrays(config, {
     _embedded_root_dir = embedded_root_dir,
     _src_root_dir = src_root_dir,
+    _api_umbrella_config_runtime_file = path.join(config["run_dir"], "runtime_config.yml"),
     _package_path = package.path,
     _package_cpath = package.cpath,
+    ["_test_env?"] = (config["app_env"] == "test"),
+    ["_development_env?"] = (config["app_env"] == "development"),
     analytics = {
       ["_output_elasticsearch?"] = array_includes(config["analytics"]["outputs"], "elasticsearch"),
-      ["_output_kylin?"] = array_includes(config["analytics"]["outputs"], "kylin"),
+    },
+    log = {
+      ["_destination_console?"] = (config["log"]["destination"] == "console"),
     },
     mongodb = {
       _database = plutils.split(array_last(plutils.split(config["mongodb"]["url"], "/", true)), "?", true)[1],
+      embedded_server_config = {
+        storage = {
+          dbPath = path.join(config["db_dir"], "mongodb"),
+        },
+      },
     },
     elasticsearch = {
       _first_server = config["elasticsearch"]["_servers"][1],
+      embedded_server_config = {
+        path = {
+          data = path.join(config["db_dir"], "elasticsearch"),
+          logs = path.join(config["log_dir"], "elasticsearch"),
+        },
+      },
+      ["_template_version_v1?"] = (config["elasticsearch"]["template_version"] == 1),
+      ["_template_version_v2?"] = (config["elasticsearch"]["template_version"] == 2),
+      ["_api_version_lte_2?"] = (config["elasticsearch"]["api_version"] <= 2),
     },
     ["_service_general_db_enabled?"] = array_includes(config["services"], "general_db"),
     ["_service_log_db_enabled?"] = array_includes(config["services"], "log_db"),
-    ["_service_hadoop_db_enabled?"] = array_includes(config["services"], "hadoop_db"),
+    ["_service_elasticsearch_aws_signing_proxy_enabled?"] = array_includes(config["services"], "elasticsearch_aws_signing_proxy"),
     ["_service_router_enabled?"] = array_includes(config["services"], "router"),
+    ["_service_auto_ssl_enabled?"] = array_includes(config["services"], "auto_ssl"),
     ["_service_web_enabled?"] = array_includes(config["services"], "web"),
-    ["_service_nginx_reloader_enabled?"] = (array_includes(config["services"], "router") and config["nginx"]["_reloader_frequency"]),
     router = {
       trusted_proxies = trusted_proxies,
     },
@@ -334,7 +444,7 @@ local function set_computed_config()
     web = {
       admin = {
         auth_strategies = {
-          ["_local_enabled?"] = array_includes(config["web"]["admin"]["auth_strategies"]["enabled"], "local"),
+          ["_enabled"] = invert_table(config["web"]["admin"]["auth_strategies"]["enabled"]),
           ["_only_ldap_enabled?"] = (#config["web"]["admin"]["auth_strategies"]["enabled"] == 1 and config["web"]["admin"]["auth_strategies"]["enabled"][1] == "ldap"),
         },
       },
@@ -349,6 +459,24 @@ local function set_computed_config()
     },
   })
 
+  if config["elasticsearch"]["api_version"] <= 2 then
+    deep_merge_overwrite_arrays(config, {
+      elasticsearch = {
+        embedded_server_config = {
+          path = {
+            conf = path.join(config["etc_dir"], "elasticsearch"),
+            scripts = path.join(config["etc_dir"], "elasticsearch_scripts"),
+          },
+        },
+      },
+    })
+  end
+
+  deep_merge_overwrite_arrays(config, {
+    _mongodb_yaml = lyaml.dump({ config["mongodb"]["embedded_server_config"] }),
+    _elasticsearch_yaml = lyaml.dump({ config["elasticsearch"]["embedded_server_config"] }),
+  })
+
   if config["app_env"] == "development" then
     config["_dev_env_install_dir"] = path.join(src_root_dir, "build/work/dev-env")
   end
@@ -356,6 +484,13 @@ local function set_computed_config()
   if config["app_env"] == "test" then
     config["_test_env_install_dir"] = path.join(src_root_dir, "build/work/test-env")
   end
+end
+
+local function set_process_permissions()
+  if config["group"] then
+    unistd.setpid("g", config["group"])
+  end
+  stat.umask(tonumber(config["umask"], 8))
 end
 
 -- Handle setup of random secret tokens that should be be unique for API
@@ -375,29 +510,37 @@ local function set_cached_random_tokens()
     local content = file.read(cached_path, true)
     local cached = {}
     if content then
-      cached = lyaml.load(content)
-      deep_merge_overwrite_arrays(config, cached)
+      cached = lyaml.load(content) or {}
+      deep_defaults(config, cached)
     end
 
     -- If the tokens haven't already been written to the cache, generate them.
     if not config["web"]["rails_secret_token"] or not config["static_site"]["api_key"] then
       if not config["web"]["rails_secret_token"] then
-        cached["web"] = {
-          rails_secret_token = random_token(128),
-        }
+        deep_defaults(cached, {
+          web = {
+            rails_secret_token = random_token(64),
+          },
+        })
       end
 
       if not config["static_site"]["api_key"] then
-        cached["static_site"] = {
-          api_key = random_token(40),
-        }
+        deep_defaults(cached, {
+          static_site = {
+            api_key = random_token(40),
+          },
+        })
       end
 
       -- Persist the cached tokens.
       dir.makepath(config["run_dir"])
       file.write(cached_path, lyaml.dump({ cached }))
+      chmod(cached_path, tonumber("0640", 8))
+      if config["group"] then
+        chown(cached_path, nil, config["group"])
+      end
 
-      deep_merge_overwrite_arrays(config, cached)
+      deep_defaults(config, cached)
     end
   end
 end
@@ -411,6 +554,10 @@ local function write_runtime_config()
   local runtime_config_path = path.join(config["run_dir"], "runtime_config.yml")
   dir.makepath(config["run_dir"])
   file.write(runtime_config_path, lyaml.dump({config}))
+  chmod(runtime_config_path, tonumber("0640", 8))
+  if config["group"] then
+    chown(runtime_config_path, nil, config["group"])
+  end
 end
 
 return function(options)
@@ -427,12 +574,16 @@ return function(options)
     read_default_config()
     read_system_config()
     set_computed_config()
+    set_process_permissions()
+
     set_cached_random_tokens()
 
     if options and options["write"] then
       write_runtime_config()
     end
   end
+
+  set_process_permissions()
 
   return config
 end

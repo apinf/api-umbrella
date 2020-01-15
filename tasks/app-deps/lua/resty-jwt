@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+lua_resty_jwt_version="0.1.10"
+
+set -e -u -x
+source ./tasks/helpers.sh
+
+opm_install "SkyLothar/lua-resty-jwt" "$lua_resty_jwt_version"
+
+stamp

@@ -1,10 +1,11 @@
 local flatten_headers = require "api-umbrella.utils.flatten_headers"
 local log_utils = require "api-umbrella.proxy.log_utils"
+local xpcall_error_handler = require "api-umbrella.utils.xpcall_error_handler"
 
 local ngx_ctx = ngx.ctx
 local ngx_var = ngx.var
 
-if log_utils.ignore_request(ngx_ctx, ngx_var) then
+if log_utils.ignore_request(ngx_ctx) then
   return
 end
 
@@ -31,8 +32,8 @@ local function build_log_data()
     request_referer = request_headers["referer"],
     request_size = ngx_var.request_length,
     request_url_host = request_headers["host"],
-    request_url_port = ngx_var.real_port,
-    request_url_scheme = ngx_var.real_scheme,
+    request_url_port = ngx_ctx.port,
+    request_url_scheme = ngx_ctx.protocol,
     request_user_agent = request_headers["user-agent"],
     response_age = response_headers["age"],
     response_cache = response_headers["x-cache"],
@@ -85,7 +86,7 @@ local function log_request()
   end
 end
 
-local ok, err = pcall(log_request)
+local ok, err = xpcall(log_request, xpcall_error_handler)
 if not ok then
   ngx.log(ngx.ERR, "failed to log request: ", err)
 end

@@ -18,7 +18,7 @@ class Test::Proxy::ApiKeyValidation::TestHittingBackendApp < Minitest::Test
 
     response = Typhoeus.get("http://127.0.0.1:9080/api/hello", keyless_http_options)
     assert_response_code(403, response)
-    assert_match("API_KEY_MISSING", response.body)
+    assert_match("API_KEY_OR_TOKEN_MISSING", response.body)
 
     response = Typhoeus.get("http://127.0.0.1:9442/backend_called")
     assert_response_code(200, response)

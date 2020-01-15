@@ -2,8 +2,9 @@ local _M = {}
 
 local admin_utils = require "api-umbrella.utils.admin"
 local cmsgpack = require "cmsgpack"
-local cjson = require "cjson"
+local config = require "api-umbrella.proxy.models.file_config"
 local invert_table = require "api-umbrella.utils.invert_table"
+local json_null = require("cjson").null
 local lrucache = require "resty.lrucache.pureffi"
 local mongo = require "api-umbrella.utils.mongo"
 local shcache = require "shcache"
@@ -31,7 +32,7 @@ local function lookup_user(api_key)
         api_key = api_key["key_value"],
       },
     })
-  elseif api_key["key_type"] == "token" and api_key["idp"]then
+  elseif api_key["key_type"] == "token" and api_key["idp"] then
     ext_user, idp_err = idp.first(api_key)
   end
 
@@ -59,7 +60,7 @@ local function lookup_user(api_key)
       raw_user, err = admin_utils.create_user(ext_user)
 
       if err then
-        ngx.log(ngx.ERR, "New user could not be created", db_err)
+        ngx.log(ngx.ERR, "New user could not be created", err)
       end
     end
   end
@@ -87,7 +88,7 @@ local function lookup_user(api_key)
     -- looping over each value).
     -- Moreover, in case that the user information have been retrieved using a token validation,
     -- the roles associated with the token are stored in user ["roles"]
-    if api_key["idp"] and api_key["key_type"] == "token" and api_key["idp"]["backend_name"] == "fiware-oauth2" and ext_user.roles then
+    if api_key["idp"] and api_key["key_type"] == "token" and (api_key["idp"]["backend_name"] == "fiware-oauth2" or api_key["idp"]["backend_name"] == "keycloak-oauth2") and ext_user.roles then
       user["roles"] = invert_table(ext_user.roles)
     elseif user["roles"] then
       user["roles"] = invert_table(user["roles"])
@@ -97,7 +98,7 @@ local function lookup_user(api_key)
       user["created_at"] = user["created_at"]["$date"]
     end
 
-    if user["settings"] and user["settings"] ~= cjson.null then
+    if user["settings"] and user["settings"] ~= json_null then
       user["settings"] = utils.pick_where_present(user["settings"], {
         "allowed_ips",
         "allowed_referers",

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+unbound_version="1.9.1"
+unbound_hash="c3c0bf9b86ccba4ca64f93dd4fe7351308ab54293f297a67de5a8914c1dc59c5"
+
+set -e -u -x
+source ./tasks/helpers.sh
+
+task_working_dir
+download "https://www.unbound.net/downloads/unbound-$unbound_version.tar.gz" "sha256" "$unbound_hash"
+extract_download "unbound-$unbound_version.tar.gz"
+
+cd "unbound-$unbound_version"
+./configure --prefix="$TEST_INSTALL_PREFIX"
+make -j"$NPROC"
+make install
+
+stamp

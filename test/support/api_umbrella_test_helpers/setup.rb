@@ -1,31 +1,38 @@
 require "English"
 require "ipaddr"
 require "support/api_umbrella_test_helpers/common_asserts"
+require "support/api_umbrella_test_helpers/shell"
 
 module ApiUmbrellaTestHelpers
   module Setup
     extend ActiveSupport::Concern
 
     include ApiUmbrellaTestHelpers::CommonAsserts
+    include ApiUmbrellaTestHelpers::Shell
 
+    @@incrementing_unique_number = 0
     @@incrementing_unique_ip_addr = IPAddr.new("127.0.0.1")
     @@current_override_config = {}
     mattr_reader :api_user
     mattr_reader :api_key
     mattr_reader :http_options
     mattr_reader :keyless_http_options
+    mattr_accessor :api_umbrella_process
     mattr_accessor :start_complete
     mattr_accessor :setup_complete
     mattr_accessor :setup_config_version_complete
     mattr_accessor :setup_api_user_complete
-    mattr_accessor(:setup_mutex) { Mutex.new }
-    mattr_accessor(:config_mutex) { Mutex.new }
-    mattr_accessor(:config_set_mutex) { Mutex.new }
-    mattr_accessor(:config_publish_mutex) { Mutex.new }
+    mattr_accessor(:setup_lock) { Monitor.new }
+    mattr_accessor(:config_lock) { Monitor.new }
+    mattr_accessor(:config_set_lock) { Monitor.new }
+    mattr_accessor(:config_publish_lock) { Monitor.new }
+    mattr_accessor(:increment_lock) { Monitor.new }
 
     included do
+      mattr_accessor :unique_test_class_id_value
+      mattr_accessor :unique_test_class_hostname_value
       mattr_accessor :class_setup_complete
-      mattr_accessor(:class_setup_mutex) { Mutex.new }
+      mattr_accessor(:class_setup_lock) { Monitor.new }
     end
 
     # Start the API Umbrella server process before any tests run.
@@ -39,10 +46,11 @@ module ApiUmbrellaTestHelpers
     # startup time in the overall test times (just not any individual test
     # times).
     def run
-      self.setup_mutex.synchronize do
+      self.setup_lock.synchronize do
         unless self.start_complete
           # Start the API Umbrella process to test against.
-          ApiUmbrellaTestHelpers::Process.start
+          self.api_umbrella_process = ApiUmbrellaTestHelpers::Process.instance
+          self.api_umbrella_process.start
           self.start_complete = true
         end
       end
@@ -53,7 +61,7 @@ module ApiUmbrellaTestHelpers
     private
 
     def setup_server
-      self.setup_mutex.synchronize do
+      self.setup_lock.synchronize do
         unless self.setup_complete
           Mongoid.load_configuration({
             :clients => {
@@ -67,13 +75,14 @@ module ApiUmbrellaTestHelpers
           client = Elasticsearch::Client.new({
             :hosts => $config["elasticsearch"]["hosts"],
           })
-          Elasticsearch::Persistence.client = client
+          LogItem.client = client
+          # Elasticsearch::Persistence.client = client
 
           # For simplicity sake, we're assuming our tests only deal with a few explicit
           # indexes currently.
           ["2013-07", "2013-08", "2014-11", "2015-01", "2015-03"].each do |month|
             # First delete any existing indexes.
-            ["api-umbrella-logs-v1-#{month}", "api-umbrella-logs-#{month}", "api-umbrella-logs-write-#{month}"].each do |index_name|
+            ["api-umbrella-logs-v#{$config["elasticsearch"]["template_version"]}-#{month}", "api-umbrella-logs-#{month}", "api-umbrella-logs-write-#{month}"].each do |index_name|
               begin
                 client.indices.delete :index => index_name
               rescue Elasticsearch::Transport::Transport::Errors::NotFound # rubocop:disable Lint/HandleExceptions
@@ -81,7 +90,7 @@ module ApiUmbrellaTestHelpers
             end
 
             # Create the index with proper aliases setup.
-            client.indices.create(:index => "api-umbrella-logs-v1-#{month}", :body => {
+            client.indices.create(:index => "api-umbrella-logs-v#{$config["elasticsearch"]["template_version"]}-#{month}", :body => {
               :aliases => {
                 "api-umbrella-logs-#{month}" => {},
                 "api-umbrella-logs-write-#{month}" => {},
@@ -151,7 +160,7 @@ module ApiUmbrellaTestHelpers
     # ConfigVersion record will be re-created for other tests that depend on
     # it.
     def default_config_version_needed
-      ApiUmbrellaTestHelpers::Setup.setup_mutex.synchronize do
+      ApiUmbrellaTestHelpers::Setup.setup_lock.synchronize do
         ApiUmbrellaTestHelpers::Setup.setup_config_version_complete = false
       end
     end
@@ -160,14 +169,14 @@ module ApiUmbrellaTestHelpers
     # they need to call this method after finishing so the default ApiUser
     # record will be re-created for other tests that depend on it.
     def default_api_user_needed
-      ApiUmbrellaTestHelpers::Setup.setup_mutex.synchronize do
+      ApiUmbrellaTestHelpers::Setup.setup_lock.synchronize do
         ApiUmbrellaTestHelpers::Setup.setup_api_user_complete = false
       end
     end
 
     def once_per_class_setup
       unless self.class_setup_complete
-        self.class_setup_mutex.synchronize do
+        self.class_setup_lock.synchronize do
           unless self.class_setup_complete
             yield
             self.class_setup_complete = true
@@ -222,7 +231,7 @@ module ApiUmbrellaTestHelpers
     end
 
     def publish_backends(type, records)
-      self.config_publish_mutex.synchronize do
+      self.config_publish_lock.synchronize do
         config = ConfigVersion.active_config || {}
         config[type] = records + (config[type] || [])
         ConfigVersion.publish!(config).wait_until_live
@@ -230,7 +239,7 @@ module ApiUmbrellaTestHelpers
     end
 
     def unpublish_backends(type, records)
-      self.config_publish_mutex.synchronize do
+      self.config_publish_lock.synchronize do
         record_ids = records.map { |record| record["_id"] }
         config = ConfigVersion.active_config || {}
         config[type].reject! { |record| record_ids.include?(record["_id"]) }
@@ -239,7 +248,7 @@ module ApiUmbrellaTestHelpers
     end
 
     def override_config(config, reload_flag)
-      self.config_mutex.synchronize do
+      self.config_lock.synchronize do
         original_config = @@current_override_config
         original_config["version"] ||= SecureRandom.uuid
 
@@ -253,17 +262,55 @@ module ApiUmbrellaTestHelpers
     end
 
     def override_config_set(config, reload_flag)
-      self.config_set_mutex.synchronize do
+      self.config_set_lock.synchronize do
         if(self.class.test_order == :parallel)
           raise "`override_config_set` cannot be called with `parallelize_me!` in the same class. Since overriding config affects the global state, it cannot be used with parallel tests."
         end
 
+        previous_override_config = @@current_override_config.deep_dup
+
         config = config.deep_stringify_keys
         config["version"] = SecureRandom.uuid
         File.write(ApiUmbrellaTestHelpers::Process::CONFIG_OVERRIDES_PATH, YAML.dump(config))
-        ApiUmbrellaTestHelpers::Process.reload(reload_flag)
+        self.api_umbrella_process.reload(reload_flag)
         @@current_override_config = config
-        ApiUmbrellaTestHelpers::Process.wait_for_config_version("file_config_version", config["version"], config)
+        Timeout.timeout(50) do
+          begin
+            self.api_umbrella_process.wait_for_config_version("file_config_version", config["version"], config)
+          rescue MultiJson::ParseError => e
+            # If the configuration changes involve changes to the
+            # "active_config" shdict size, then this can result in the API
+            # configuration being temporarily unpublished during reloads. In
+            # these cases, the publishing process may temporarily throw errors,
+            # since the "state" and "health" endpoints may temporarily go
+            # missing. So in these cases, retry and wait for the configuration
+            # publishing to take effect again.
+            if(previous_override_config.dig("nginx", "shared_dicts", "active_config") || @@current_override_config.dig("nginx", "shared_dicts", "active_config"))
+              sleep 0.1
+              retry
+            else
+              raise e
+            end
+          end
+        end
+
+        # When changes to the DNS server are made, this is one area where a
+        # simple "reload" signal won't do the trick. Instead, we also need to
+        # fully restart Traffic Server to pick up these changes (technically
+        # there's ways to force Traffic Server to pick these changes up without
+        # a full restart, but it's hard to figure out the timing, so with this
+        # mainly being a test issue, we'll force a full restart).
+        if(previous_override_config.dig("dns_resolver", "nameservers") || @@current_override_config.dig("dns_resolver", "nameservers"))
+          self.api_umbrella_process.restart_trafficserver
+
+        # When changing the keepalive idle timeout, a normal reload will pick
+        # these changes up, but they don't kick in for a few seconds, which is
+        # hard to time correctly in the test suite. So similarly, do a full
+        # restart to make it easier to know for sure the new settings are in
+        # effect.
+        elsif(previous_override_config.dig("router", "api_backends", "keepalive_idle_timeout") || @@current_override_config.dig("router", "api_backends", "keepalive_idle_timeout"))
+          self.api_umbrella_process.restart_trafficserver
+        end
       end
     end
 
@@ -271,17 +318,63 @@ module ApiUmbrellaTestHelpers
       override_config_set({}, reload_flag)
     end
 
+    def to_unique_id(name)
+      name.gsub(/[^\w]+/, "-")
+    end
+
+    def to_unique_hostname(name)
+      # Replace all non alpha-numeric chars (namely underscores that might be
+      # in the ID) with dashes (since underscores aren't valid for hostnames).
+      hostname = name.downcase.gsub(/[^a-z0-9]+/, "-")
+
+      # Truncate the hostname so the label will fit in unbound's 63 char limit.
+      hostname = hostname[-56..-1] || hostname
+
+      # Strip first char if it happens to be a dash.
+      hostname.gsub!(/^-/, "")
+
+      # Since we've truncated the test ID, it's possible it's no longer unique,
+      # so append a unique number to the end (ensuring that it will fit within
+      # the 63 char limit).
+      unique_number = next_unique_number
+      assert_operator(unique_number, :<=, 999999)
+      hostname = "#{hostname}-#{unique_number.to_s.rjust(6, "0")}"
+
+      hostname
+    end
+
     def unique_test_class_id
-      @unique_test_class_id ||= self.class.name.gsub(/[^\w]+/, "-")
+      self.unique_test_class_id_value ||= to_unique_id(self.class.name)
+    end
+
+    def unique_test_class_hostname
+      self.unique_test_class_hostname_value ||= to_unique_hostname(unique_test_class_id)
     end
 
     def unique_test_id
-      @unique_test_id ||= self.location.gsub(/[^\w]+/, "-")
+      @unique_test_id ||= to_unique_id(self.location)
+    end
+
+    def unique_test_subdomain
+      @unique_test_subdomain ||= to_unique_hostname(unique_test_id)
+    end
+
+    def unique_test_hostname
+      @unique_test_hostname ||= "#{unique_test_subdomain}.test"
+    end
+
+    def next_unique_number
+      self.increment_lock.synchronize do
+        @@incrementing_unique_number += 1
+        @@incrementing_unique_number
+      end
     end
 
     def next_unique_ip_addr
-      @@incrementing_unique_ip_addr = @@incrementing_unique_ip_addr.succ
-      @@incrementing_unique_ip_addr.to_s
+      self.increment_lock.synchronize do
+        @@incrementing_unique_ip_addr = @@incrementing_unique_ip_addr.succ
+        @@incrementing_unique_ip_addr.to_s
+      end
     end
 
     def unique_test_ip_addr
@@ -306,12 +399,6 @@ module ApiUmbrellaTestHelpers
           "X-Empty-Http-Header-Curl-Workaround#{@empty_http_header_counter}" => "ignore\r\n#{header}:",
         },
       }
-    end
-
-    def run_shell(command)
-      output = `#{command} 2>&1`
-      status = $CHILD_STATUS.to_i
-      [output, status]
     end
   end
 end

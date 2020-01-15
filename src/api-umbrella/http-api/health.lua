@@ -1,15 +1,14 @@
-local cjson = require "cjson"
+local config = require "api-umbrella.proxy.models.file_config"
+local elasticsearch_query = require("api-umbrella.utils.elasticsearch").query
 local http = require "resty.http"
+local json_encode = require "api-umbrella.utils.json_encode"
 
-local function status_response()
+local function status_response(quick)
   local response = {
     status = "red",
     details = {
       apis_config = "red",
       api_users = "red",
-      analytics_db = "red",
-      analytics_db_setup = "red",
-      web_app = "red",
     },
   }
 
@@ -23,26 +22,38 @@ local function status_response()
     response["details"]["api_users"] = "green"
   end
 
+  if quick then
+    if response["details"]["apis_config"] == "green" and response["details"]["api_users"] == "green" then
+      response["status"] = "green"
+    end
+
+    return response
+  end
+
+  response["details"]["analytics_db"] = "red"
+  response["details"]["analytics_db_setup"] = "red"
+  response["details"]["web_app"] = "red"
+
   local httpc = http.new()
   httpc:set_timeout(3000)
 
   -- Check the health of the ElasticSearch cluster
-  local res, err = httpc:request_uri(config["elasticsearch"]["hosts"][1] .. "/_cluster/health")
+  local res, err = elasticsearch_query("/_cluster/health")
   if err then
     ngx.log(ngx.ERR, "failed to fetch cluster health from elasticsearch: ", err)
-  elseif res.body then
-    local elasticsearch_health = cjson.decode(res.body)
+  elseif res.body_json then
+    local elasticsearch_health = res.body_json
     response["details"]["analytics_db"] = elasticsearch_health["status"]
 
     -- Check to see if the ElasticSearch index aliases have been setup.
     local today = os.date("!%Y-%m", ngx.time())
     local alias = "api-umbrella-logs-" .. today
-    local index = "api-umbrella-logs-" .. config["log_template_version"] .. "-" .. today
-    res, err = httpc:request_uri(config["elasticsearch"]["hosts"][1] .. "/" .. index .. "/_alias/" .. alias)
+    local index = "api-umbrella-logs-v" .. config["elasticsearch"]["template_version"] .. "-" .. today
+    res, err = elasticsearch_query("/" .. index .. "/_alias/" .. alias)
     if err then
       ngx.log(ngx.ERR, "failed to fetch elasticsearch alias details: ", err)
-    elseif res.body then
-      local elasticsearch_alias = cjson.decode(res.body)
+    elseif res.body_json then
+      local elasticsearch_alias = res.body_json
       if not elasticsearch_alias["error"] then
         response["details"]["analytics_db_setup"] = "green"
       end
@@ -82,14 +93,15 @@ end
 -- wait_for_status=yellow will return if the status is actually yellow.
 local response
 local wait_for_status = ngx.var.arg_wait_for_status
+local quick = ngx.var.arg_quick == "true"
 if not wait_for_status then
-  response = status_response()
+  response = status_response(quick)
 else
   -- Validate the wait_for_status param.
   if wait_for_status ~= "green" and wait_for_status ~= "yellow" and wait_for_status ~= "red" then
     ngx.status = 422
     ngx.header["Content-Type"] = "application/json"
-    ngx.say(cjson.encode({
+    ngx.say(json_encode({
       error = "Invalid wait_for_status argument (" .. (tostring(wait_for_status) or "") .. ")",
     }))
     return ngx.exit(ngx.HTTP_OK)
@@ -100,7 +112,7 @@ else
   if not wait_timeout then
     ngx.status = 422
     ngx.header["Content-Type"] = "application/json"
-    ngx.say(cjson.encode({
+    ngx.say(json_encode({
       error = "Invalid wait_timeout argument (" .. (tostring(wait_timeout) or "") .. ")",
     }))
     return ngx.exit(ngx.HTTP_OK)
@@ -109,7 +121,7 @@ else
   -- Loop until the status is met or we timeout.
   local timeout_at = ngx.now() + wait_timeout
   while true do
-    response = status_response()
+    response = status_response(quick)
 
     -- Break out of loop if the status (or better) is met.
     local status = response["status"]
@@ -138,4 +150,4 @@ if response["status"] == "red" then
 end
 
 ngx.header["Content-Type"] = "application/json"
-ngx.say(cjson.encode(response))
+ngx.say(json_encode(response))

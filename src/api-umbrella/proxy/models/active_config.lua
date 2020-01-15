@@ -1,19 +1,21 @@
 local cidr = require "libcidr-ffi"
-local cjson = require "cjson"
+local config = require "api-umbrella.proxy.models.file_config"
 local escape_regex = require "api-umbrella.utils.escape_regex"
 local host_normalize = require "api-umbrella.utils.host_normalize"
-local load_backends = require "api-umbrella.proxy.load_backends"
+local json_encode = require "api-umbrella.utils.json_encode"
 local mustache_unescape = require "api-umbrella.utils.mustache_unescape"
+local packed_shared_dict = require "api-umbrella.utils.packed_shared_dict"
 local plutils = require "pl.utils"
-local resolve_backend_dns = require "api-umbrella.proxy.jobs.resolve_backend_dns"
+local random_token = require "api-umbrella.utils.random_token"
+local startswith = require("pl.stringx").startswith
 local tablex = require "pl.tablex"
 local utils = require "api-umbrella.proxy.utils"
+local xpcall_error_handler = require "api-umbrella.utils.xpcall_error_handler"
 
 local append_array = utils.append_array
 local cache_computed_settings = utils.cache_computed_settings
 local deepcopy = tablex.deepcopy
-local escape = plutils.escape
-local set_packed = utils.set_packed
+local safe_set_packed = packed_shared_dict.safe_set_packed
 local size = tablex.size
 local split = plutils.split
 
@@ -54,12 +56,23 @@ local function cache_computed_api(api)
 
   if api["url_matches"] then
     for _, url_match in ipairs(api["url_matches"]) do
-      url_match["_frontend_prefix_matcher"] = "^" .. escape(url_match["frontend_prefix"])
-      url_match["_backend_prefix_matcher"] = "^" .. escape(url_match["backend_prefix"])
+      url_match["_frontend_prefix_regex"] = "^" .. escape_regex(url_match["frontend_prefix"])
+      url_match["_backend_prefix_regex"] = "^" .. escape_regex(url_match["backend_prefix"])
+
+      url_match["_frontend_prefix_contains_backend_prefix"] = false
+      if startswith(url_match["frontend_prefix"], url_match["backend_prefix"]) then
+        url_match["_frontend_prefix_contains_backend_prefix"] = true
+      end
+
+      url_match["_backend_prefix_contains_frontend_prefix"] = false
+      if startswith(url_match["backend_prefix"], url_match["frontend_prefix"]) then
+        url_match["_backend_prefix_contains_frontend_prefix"] = true
+      end
     end
   end
 
   if api["servers"] then
+    api["_servers_count"] = #api["servers"]
     for _, server in ipairs(api["servers"]) do
       if server["host"] then
         if cidr.from_str(server["host"]) then
@@ -164,7 +177,7 @@ end
 
 local function parse_api(api)
   if not api["_id"] then
-    api["_id"] = ngx.md5(cjson.encode(api))
+    api["_id"] = ngx.md5(json_encode(api))
   end
 
   cache_computed_api(api)
@@ -174,7 +187,7 @@ end
 
 local function parse_apis(apis)
   for _, api in ipairs(apis) do
-    local ok, err = pcall(parse_api, api)
+    local ok, err = xpcall(parse_api, xpcall_error_handler, api)
     if not ok then
       ngx.log(ngx.ERR, "failed parsing API config: ", err)
     end
@@ -183,7 +196,7 @@ end
 
 local function parse_website_backend(website_backend)
   if not website_backend["_id"] then
-    website_backend["_id"] = ndk.set_var.set_secure_random_alphanum(32)
+    website_backend["_id"] = random_token(32)
   end
 
   if website_backend["frontend_host"] then
@@ -193,7 +206,7 @@ end
 
 local function parse_website_backends(website_backends)
   for _, website_backend in ipairs(website_backends) do
-    local ok, err = pcall(parse_website_backend, website_backend)
+    local ok, err = xpcall(parse_website_backend, xpcall_error_handler, website_backend)
     if not ok then
       ngx.log(ngx.ERR, "failed parsing website backend config: ", err)
     end
@@ -244,13 +257,51 @@ function _M.set(db_config)
   local website_backends = get_combined_website_backends(file_config, db_config)
 
   local active_config = build_active_config(apis, website_backends)
-  resolve_backend_dns.resolve(active_config["apis"])
-  load_backends.setup_backends(active_config["apis"])
+  local previous_packed_config = ngx.shared.active_config:get("packed_data")
 
-  set_packed(ngx.shared.active_config, "packed_data", active_config)
-  ngx.shared.active_config:set("db_version", db_config["version"])
-  ngx.shared.active_config:set("file_version", file_config["version"])
-  ngx.shared.active_config:set("worker_group_setup_complete:" .. WORKER_GROUP_ID, true)
+  local set_ok, set_err = safe_set_packed(ngx.shared.active_config, "packed_data", active_config)
+  if not set_ok then
+    ngx.log(ngx.ERR, "failed to set 'packed_data' in 'active_config' shared dict: ", set_err)
+
+    -- If the new config exceeds the amount of available space, `safe_set` will
+    -- still result in the previous value for `packed_data` getting removed
+    -- (see https://github.com/openresty/lua-nginx-module/issues/1365). This
+    -- effectively unpublishes all configuration, which can be disruptive if
+    -- your new config happens to exceed the allocated space.
+    --
+    -- So to more safely handle this scenario, revert `packed_data` back to the
+    -- previously set value (that presumably fits in memory) so that the
+    -- previous config remains in place. The new configuration will go
+    -- unpublished, but this at least keeps the system up in the previous
+    -- state.
+    --
+    -- When this occurs, we will go ahead and set the `db_version` and
+    -- `file_version` to the new versions, even though this isn't entirely
+    -- accurate (since we're reverting to the previous config). But by
+    -- pretending the data was successfully set, this prevents the system from
+    -- looping indefinitely and trying to set the config over and over to a
+    -- version that won't fit in memory. In this situation, there's not much
+    -- else we can do, since the shdict memory needs to be increased.
+    set_ok, set_err = ngx.shared.active_config:safe_set("packed_data", previous_packed_config)
+    if not set_ok then
+      ngx.log(ngx.ERR, "failed to set 'packed_data' in 'active_config' shared dict: ", set_err)
+    end
+  end
+
+  set_ok, set_err = ngx.shared.active_config:safe_set("db_version", db_config["version"])
+  if not set_ok then
+    ngx.log(ngx.ERR, "failed to set 'db_version' in 'active_config' shared dict: ", set_err)
+  end
+
+  set_ok, set_err = ngx.shared.active_config:safe_set("file_version", file_config["version"])
+  if not set_ok then
+    ngx.log(ngx.ERR, "failed to set 'file_version' in 'active_config' shared dict: ", set_err)
+  end
+
+  set_ok, set_err = ngx.shared.active_config:safe_set("worker_group_setup_complete:" .. WORKER_GROUP_ID, true)
+  if not set_ok then
+    ngx.log(ngx.ERR, "failed to set 'worker_group_setup_complete' in 'active_config' shared dict: ", set_err)
+  end
 end
 
 return _M

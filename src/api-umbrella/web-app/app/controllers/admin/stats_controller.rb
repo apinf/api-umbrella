@@ -36,6 +36,96 @@ class Admin::StatsController < Admin::BaseController
     @result = @search.result
   end
 
+  def logs
+    @search = LogSearch.factory(@analytics_adapter, {
+      :start_time => params[:start_at],
+      :end_time => params[:end_at],
+      :interval => params[:interval],
+    })
+    policy_scope(@search)
+
+    offset = params[:start].to_i
+    limit = params[:length].to_i
+    if(request.format == "csv")
+      limit = 500
+    end
+
+    @search.search!(params[:search])
+    @search.query!(params[:query])
+    @search.filter_by_date_range!
+    @search.offset!(offset)
+    @search.limit!(limit)
+    @search.select_records!
+
+    sort = datatables_sort
+    if(sort.any?)
+      @search.sort!(sort)
+    end
+
+    if(request.format == "csv")
+      @search.query_options[:scroll] = "10m"
+      @search.query_options[:sort] = ["_doc"]
+    end
+
+    @result = @search.result
+
+    respond_to do |format|
+      format.json
+      format.csv do
+        # Set Last-Modified so response streaming works:
+        # http://stackoverflow.com/a/10252798/222487
+        response.headers["Last-Modified"] = Time.now.utc.httpdate
+
+        headers = [
+          "Time",
+          "Method",
+          "Host",
+          "URL",
+          "User",
+          "IP Address",
+          "Country",
+          "State",
+          "City",
+          "Status",
+          "Reason Denied",
+          "Response Time",
+          "Content Type",
+          "Accept Encoding",
+          "User Agent",
+          "User Agent Family",
+          "User Agent Type",
+          "Referer",
+          "Origin",
+        ]
+
+        send_file_headers!(:disposition => "attachment", :filename => "api_logs (#{Time.now.utc.strftime("%b %-e %Y")}).#{params[:format]}")
+        self.response_body = CsvStreamer.new(@result, headers) do |row|
+          [
+            csv_time(row["request_at"]),
+            row["request_method"],
+            row["request_host"],
+            sanitized_full_url(row),
+            row["user_email"],
+            row["request_ip"],
+            row["request_ip_country"],
+            row["request_ip_region"],
+            row["request_ip_city"],
+            row["response_status"],
+            row["gatekeeper_denied_code"],
+            row["response_time"],
+            row["response_content_type"],
+            row["request_accept_encoding"],
+            row["request_user_agent"],
+            row["request_user_agent_family"],
+            row["request_user_agent_type"],
+            row["request_referer"],
+            row["request_origin"],
+          ]
+        end
+      end
+    end
+  end
+
   def users
     @search = LogSearch.factory(@analytics_adapter, {
       :start_time => params[:start_at],
@@ -76,7 +166,7 @@ class Admin::StatsController < Admin::BaseController
     @search.aggregate_by_user_stats!(aggregation_options)
 
     @result = @search.result
-    buckets = @result.aggregations["user_stats"]["buckets"]
+    buckets = if(@result.aggregations && @result.aggregations["user_stats"]) then @result.aggregations["user_stats"]["buckets"] else [] end
     @total = buckets.length
 
     # If we were sorting by one of the facet fields, then the sorting has
@@ -125,7 +215,9 @@ class Admin::StatsController < Admin::BaseController
 
     respond_to do |format|
       format.json
-      format.csv
+      format.csv do
+        @filename = "api_users_#{Time.now.utc.strftime("%Y-%m-%d")}.csv"
+      end
     end
   end
 
@@ -146,7 +238,9 @@ class Admin::StatsController < Admin::BaseController
 
     respond_to do |format|
       format.json
-      format.csv
+      format.csv do
+        @filename = "api_map_#{Time.now.utc.strftime("%Y-%m-%d")}.csv"
+      end
     end
   end
 end

@@ -26,16 +26,16 @@ class Test::Proxy::FormattedErrors::TestTemplates < Minitest::Test
     })
     prepend_api_backends([@api]) do
       response = Typhoeus.get("http://127.0.0.1:9080/#{unique_test_id}/hello.json", keyless_http_options)
-      assert_equal('{ "code": "API_KEY_MISSING" }', response.body)
+      assert_equal('{ "code": "API_KEY_OR_TOKEN_MISSING" }', response.body)
 
       response = Typhoeus.get("http://127.0.0.1:9080/#{unique_test_id}/hello.xml", keyless_http_options)
-      assert_equal('<?xml version="1.0" encoding="UTF-8"?><code>API_KEY_MISSING</code>', response.body)
+      assert_equal('<?xml version="1.0" encoding="UTF-8"?><code>API_KEY_OR_TOKEN_MISSING</code>', response.body)
 
       response = Typhoeus.get("http://127.0.0.1:9080/#{unique_test_id}/hello.csv", keyless_http_options)
-      assert_equal(%(Code\n"API_KEY_MISSING"), response.body)
+      assert_equal(%(Code\n"API_KEY_OR_TOKEN_MISSING"), response.body)
 
       response = Typhoeus.get("http://127.0.0.1:9080/#{unique_test_id}/hello.html", keyless_http_options)
-      assert_equal("<html><body><h1>API_KEY_MISSING</h1></body></html>", response.body)
+      assert_equal("<html><body><h1>API_KEY_OR_TOKEN_MISSING</h1></body></html>", response.body)
     end
   end
 

@@ -2,32 +2,35 @@ require_relative "../test_helper"
 
 class Test::Processes::TestNetworkBinds < Minitest::Test
   include ApiUmbrellaTestHelpers::Setup
+  include ApiUmbrellaTestHelpers::Lsof
 
   def setup
     super
     setup_server
   end
 
-  def test_quick_timeout_when_backends_down
-    pid_path = File.join($config["run_dir"], "perpboot.pid")
-    output, status = run_shell("lsof -n -P -l -R -p $(pstree -p $(cat #{pid_path}) | grep -o '([0-9]\\+)' | grep -o '[0-9]\\+' | tr '\\012' ',') | grep LISTEN")
-    assert_equal(0, status, output)
+  def test_binds_http_to_public_interface_other_services_to_localhost
+    files = lsof("-i", "TCP", "-s", "TCP:LISTEN")
 
     listening = {
       :local => Set.new,
+      :local_ports => Set.new,
       :public => Set.new,
     }
-    output.strip.split("\n").each do |line|
-      ip_version = line.match(/(IPv4|IPv6)/)[1]
-      assert(ip_version, line)
+    files.each do |file|
+      assert_equal("TCP", file.fetch(:protocol))
 
-      port = line.match(/:(\d+) \(LISTEN\)/)[1]
-      assert(port, line)
+      ip_version = file.fetch(:type)
+      assert_includes(["IPv4", "IPv6"], ip_version)
+
+      port = file.fetch(:file).match(/:(\d+)/)[1]
+      assert(port, file)
 
       listen = "#{port}:#{ip_version}"
-      if(line.include?("TCP 127.0.0.1:") || line.include?("TCP [::1]:"))
+      if(file.fetch(:file).start_with?("127.0.0.1:", "[::1]:"))
         listening[:local] << listen
-      elsif(line.include?("TCP *:"))
+        listening[:local_ports] << port.to_i
+      elsif(file.fetch(:file).start_with?("*:"))
         listening[:public] << listen
       else
         flunk("Unknown listening (not localhost or public): #{line.inspect}")
@@ -48,7 +51,16 @@ class Test::Processes::TestNetworkBinds < Minitest::Test
       # 127.0.0.3, etc.
       "9444:IPv4",
       "9444:IPv6",
-    ], listening[:public].sort)
+    ].sort, listening[:public].sort)
+
+    # Ensure all other services are listening on localhost-only, and sanity
+    # check to ensure some of the expected services were present in the lsof
+    # output.
     assert_operator(listening[:local].length, :>, 0)
+    assert_operator(listening[:local_ports].length, :>, 0)
+    assert_includes(listening[:local_ports], $config.fetch("elasticsearch").fetch("embedded_server_config").fetch("http").fetch("port"))
+    assert_includes(listening[:local_ports], $config.fetch("mongodb").fetch("embedded_server_config").fetch("net").fetch("port"))
+    assert_includes(listening[:local_ports], $config.fetch("mora").fetch("port"))
+    assert_includes(listening[:local_ports], $config.fetch("trafficserver").fetch("port"))
   end
 end

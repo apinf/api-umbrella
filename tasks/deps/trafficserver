@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+trafficserver_version="8.0.3"
+trafficserver_hash="a458a12f4ba2e7f9e01e81c1bed8afc95a1195fbbea643cde7ceca0af692d11e7dcfd2c744ea5d4142b9f08651bbcb716e88c7d79666be7ccf05ed7098bb4c5a"
+
+set -e -u -x
+source ./tasks/helpers.sh
+
+task_working_dir
+download "https://archive.apache.org/dist/trafficserver/trafficserver-$trafficserver_version.tar.bz2" "sha512" "$trafficserver_hash"
+extract_download "trafficserver-$trafficserver_version.tar.bz2"
+
+cd "trafficserver-$trafficserver_version"
+SPHINXBUILD=false ./configure \
+  --prefix="$INSTALL_PREFIX_EMBEDDED" \
+  --with-luajit="$STAGE_EMBEDDED_DIR/openresty/luajit"
+make -j"$NPROC"
+make install DESTDIR="$STAGE_DIR"
+chrpath -d "$STAGE_EMBEDDED_DIR/lib/libtscore.so"
+chrpath -d "$STAGE_EMBEDDED_DIR/lib/libtsmgmt.so"
+find "$STAGE_EMBEDDED_DIR/libexec/trafficserver/" -name "*.so" -exec chrpath -d {} \;
+find "$STAGE_EMBEDDED_DIR/bin/" -name "traffic_*" -exec chrpath -d {} \;
+
+stamp

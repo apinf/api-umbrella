@@ -80,6 +80,7 @@ class Test::Apis::V1::Users::TestIndex < Minitest::Test
       "headers",
       "http_basic_auth",
       "id",
+      "idp_mode",
       "idp_app_id",
       "override_response_headers",
       "pass_api_key_header",

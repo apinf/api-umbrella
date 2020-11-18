@@ -23,6 +23,7 @@ class Api::Settings
   field :error_templates, :type => Hash
   field :error_data, :type => Hash
   field :ext_auth_allowed, :type => Boolean
+  field :idp_mode, :type => String
   field :idp_app_id, :type => String
 
   # Relations

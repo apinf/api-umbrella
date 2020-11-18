@@ -9,6 +9,7 @@ export default DS.Model.extend({
   headersString: DS.attr(),
   httpBasicAuth: DS.attr(),
   extAuthAllowed: DS.attr(),
+  idpMode: DS.attr(),
   idpAppId: DS.attr(),
   requiredHeadersString: DS.attr(),
   requireHttps: DS.attr(),
@@ -37,6 +38,10 @@ export default DS.Model.extend({
   },
 
   setDefaults() {
+    if(this.idpMode === undefined) {
+      this.set('idpMode', null);
+    }
+
     if(this.requireHttps === undefined) {
       this.set('requireHttps', null);
     }

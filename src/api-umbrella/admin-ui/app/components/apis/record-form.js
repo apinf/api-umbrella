@@ -17,6 +17,12 @@ export default Component.extend(Save, {
       { id: 'round_robin', name: 'Round Robin' },
       { id: 'ip_hash', name: 'Source IP Hash' },
     ];
+
+    this.idpModeOptions = [
+      { id: null, name: 'Default: Authentication' },
+      { id: 'authentication', name: 'Authentication' },
+      { id: 'authorization', name: 'Authorization' },
+    ];
   },
 
   actions: {

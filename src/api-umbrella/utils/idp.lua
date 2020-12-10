@@ -61,6 +61,11 @@ local function get_idm_user_info(token, dict)
         result = cjson.decode(body)
 
         if idp_back_name == "fiware-oauth2" then
+	    -- In authorization mode, first evaluate authorization_decision flag
+	    if mode == "authorization" and result["authorization_decision"] ~= "Permit" then
+	       return nil, " Authorization denied"
+	    end
+
             -- Process organization info to generate organization scope roles
             if result["organizations"] ~= nil then
                 for _, org in ipairs(result["organizations"]) do

@@ -17,7 +17,7 @@ task_working_dir
 download "https://ftp.pcre.org/pub/pcre/pcre-$pcre_version.tar.bz2" "md5" "$pcre_hash"
 extract_download "pcre-$pcre_version.tar.bz2"
 
-download "https://www.openssl.org/source/openssl-$openssl_version.tar.gz" "sha256" "$openssl_hash"
+download "https://www.openssl.org/source/old/1.0.2/openssl-$openssl_version.tar.gz" "sha256" "$openssl_hash"
 extract_download "openssl-$openssl_version.tar.gz"
 
 download "https://openresty.org/download/openresty-$openresty_version.tar.gz" "md5" "$openresty_hash"

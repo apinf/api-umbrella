@@ -1,4 +1,9 @@
+[![](https://nexus.lab.fiware.org/repository/raw/public/badges/chapters/api-management.svg)](https://www.fiware.org/developers/catalogue/)
+[![License badge](https://img.shields.io/github/license/FIWARE/api-umbrella.svg)](https://opensource.org/licenses/MIT)
+[![](https://img.shields.io/badge/tag-fiware-orange.svg?logo=stackoverflow)](http://stackoverflow.com/questions/tagged/fiware)
+<br>
 [![CircleCI](https://circleci.com/gh/NREL/api-umbrella.svg?style=svg)](https://circleci.com/gh/NREL/api-umbrella)
+![Status](https://nexus.lab.fiware.org/static/badges/statuses/apinf.svg)
 #
 # APInf Umbrella
 
